@@ -43,6 +43,7 @@ function advanceKnockout(matches: Match[]) {
 }
 
 const initial: Tournament = { name: "Friday Night League", format: "league", players: demoPlayers, matches: makeFixtures(demoPlayers, "league") };
+const API_BASE = "https://lagata-live-scores.benernestcass.chatgpt.site";
 
 export default function Home() {
   const [data, setData] = useState<Tournament>(initial);
@@ -57,22 +58,22 @@ export default function Home() {
     const params = new URLSearchParams(location.search); const tournamentId = params.get("t") || "";
     if (tournamentId) {
       setShareId(tournamentId); setEditToken(localStorage.getItem(`lagata-edit-${tournamentId}`) || "");
-      fetch(`/api/tournament?id=${encodeURIComponent(tournamentId)}`).then((r) => r.ok ? r.json() : Promise.reject()).then(({ tournament }) => { setData({ ...tournament, format: tournament.format || "league" }); cloudLoaded.current = true; setReady(true); }).catch(() => setReady(true));
+      fetch(`${API_BASE}/api/tournament?id=${encodeURIComponent(tournamentId)}`).then((r) => r.ok ? r.json() : Promise.reject()).then(({ tournament }) => { setData({ ...tournament, format: tournament.format || "league" }); cloudLoaded.current = true; setReady(true); }).catch(() => setReady(true));
     } else { const saved = localStorage.getItem("fc-night-tournament"); if (saved) try { const parsed = JSON.parse(saved); setData({ ...parsed, format: parsed.format || "league" }); } catch {} setReady(true); }
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("lagata-theme", theme); }, [theme]);
   useEffect(() => { if (ready && !shareId) localStorage.setItem("fc-night-tournament", JSON.stringify(data)); }, [data, ready, shareId]);
   useEffect(() => {
     if (!shareId || !editToken || !cloudLoaded.current) return;
-    setShareState("saving"); const timer = setTimeout(() => fetch(`/api/tournament?id=${encodeURIComponent(shareId)}`, { method: "PUT", headers: { "content-type": "application/json", "x-edit-token": editToken }, body: JSON.stringify({ tournament: data }) }).then((r) => { if (!r.ok) throw new Error(); setShareState("idle"); }).catch(() => setShareState("error")), 650);
+    setShareState("saving"); const timer = setTimeout(() => fetch(`${API_BASE}/api/tournament?id=${encodeURIComponent(shareId)}`, { method: "PUT", headers: { "content-type": "application/json", "x-edit-token": editToken }, body: JSON.stringify({ tournament: data }) }).then((r) => { if (!r.ok) throw new Error(); setShareState("idle"); }).catch(() => setShareState("error")), 650);
     return () => clearTimeout(timer);
   }, [data, shareId, editToken]);
   useEffect(() => {
-    if (!shareId || editToken) return; const refresh = () => fetch(`/api/tournament?id=${encodeURIComponent(shareId)}`).then((r) => r.json()).then(({ tournament }) => tournament && setData(tournament)).catch(() => {});
+    if (!shareId || editToken) return; const refresh = () => fetch(`${API_BASE}/api/tournament?id=${encodeURIComponent(shareId)}`).then((r) => r.json()).then(({ tournament }) => tournament && setData(tournament)).catch(() => {});
     const timer = setInterval(refresh, 5000); return () => clearInterval(timer);
   }, [shareId, editToken]);
 
-  const sharingAvailable = false;
+  const sharingAvailable = true;
   const isViewer = Boolean(shareId && !editToken); const playerById = (id: string) => data.players.find((p) => p.id === id);
   const maxRound = Math.max(1, ...data.matches.map((m) => m.round)); const completed = data.matches.filter((m) => m.homeScore !== null && m.awayScore !== null).length;
   const progress = data.matches.length ? Math.round((completed / data.matches.length) * 100) : 0;
@@ -91,11 +92,11 @@ export default function Home() {
   function updatePlayer(id: string, field: "name" | "team", value: string) { setDraft((d) => ({ ...d, players: d.players.map((p) => p.id === id ? { ...p, [field]: value } : p) })); }
   async function shareTournament() {
     if (shareId) { const url = `${location.origin}${location.pathname}?t=${shareId}`; await navigator.clipboard.writeText(url); setShareState("copied"); setTimeout(() => setShareState("idle"), 1600); return; }
-    setShareState("saving"); try { const response = await fetch("/api/tournament", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tournament: data }) }); if (!response.ok) throw new Error(); const result = await response.json(); localStorage.setItem(`lagata-edit-${result.id}`, result.editToken); setShareId(result.id); setEditToken(result.editToken); cloudLoaded.current = true; history.replaceState({}, "", `${location.pathname}?t=${result.id}`); await navigator.clipboard.writeText(`${location.origin}${location.pathname}?t=${result.id}`); setShareState("copied"); setTimeout(() => setShareState("idle"), 1600); } catch { setShareState("error"); }
+    setShareState("saving"); try { const response = await fetch(`${API_BASE}/api/tournament`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tournament: data }) }); if (!response.ok) throw new Error(); const result = await response.json(); localStorage.setItem(`lagata-edit-${result.id}`, result.editToken); setShareId(result.id); setEditToken(result.editToken); cloudLoaded.current = true; history.replaceState({}, "", `${location.pathname}?t=${result.id}`); await navigator.clipboard.writeText(`${location.origin}${location.pathname}?t=${result.id}`); setShareState("copied"); setTimeout(() => setShareState("idle"), 1600); } catch { setShareState("error"); }
   }
 
   return <main>
-    <header className="topbar"><a className="brand" href="#"><span className="brandMark" aria-hidden="true"><i>L</i><b>UT</b></span><span>LAGATA <em>ULTIMATE TEAM</em></span></a><div className="topActions"><button className="iconButton" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={`Use ${theme === "light" ? "dark" : "light"} mode`}>{theme === "light" ? "◐" : "☀"}</button>{!isViewer && sharingAvailable && <button className="shareButton" onClick={shareTournament}>{shareState === "copied" ? "Link copied" : shareState === "saving" ? "Saving…" : shareId ? "Copy spectator link" : "Share live"}</button>}<button className="ghostButton" onClick={openSetup} disabled={isViewer}><span className="settingsGlyph" aria-hidden="true">•••</span><span>{isViewer ? "View only" : "Manage tournament"}</span></button></div></header>
+    <header className="topbar"><a className="brand" href="#"><span className="brandMark" aria-hidden="true"><i>L</i><b>UT</b></span><span>LAGATA <em>ULTIMATE TEAM</em></span></a><div className="topActions"><button className="iconButton" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={`Use ${theme === "light" ? "dark" : "light"} mode`}>{theme === "light" ? "◐" : "☀"}</button>{!isViewer && sharingAvailable && <button className="shareButton" onClick={shareTournament}><span aria-hidden="true">↗</span>{shareState === "copied" ? "Link copied" : shareState === "saving" ? "Saving…" : shareId ? "Copy link" : "Share live"}</button>}<button className="ghostButton" onClick={openSetup} disabled={isViewer} aria-label={isViewer ? "View only" : "Manage tournament"}><span className="settingsGlyph" aria-hidden="true">•••</span><span>{isViewer ? "View only" : "Manage tournament"}</span></button></div></header>
     {isViewer && <div className="viewerBar"><span className="liveDot" /> Live spectator view <b>Scores refresh automatically</b></div>}
     <section className="hero"><div><p className="eyebrow"><span className="liveDot" /> {champion ? "Tournament complete" : "Tournament in progress"}</p><h1>{data.name}</h1><p className="subline">{data.players.length} players <span>•</span> {data.format === "league" ? "League phase" : "Knockout cup"} <span>•</span> {data.format === "league" ? "3 pts per win" : "One champion"}</p></div>{champion ? <div className="championCard"><span>CHAMPION</span><strong>🏆 {champion.name}</strong><small>{champion.team}</small></div> : <div className="progressCard"><div className="progressTop"><span>Tournament progress</span><strong>{progress}%</strong></div><div className="progressTrack"><i style={{ width: `${progress}%` }} /></div><small>{completed} of {data.matches.length} matches played</small></div>}</section>
     <section className="content"><div className="tabs" role="tablist"><button className={tab === "matches" ? "active" : ""} onClick={() => setTab("matches")}>Matches <b>{data.matches.length - completed}</b></button><button className={tab === "table" ? "active" : ""} onClick={() => setTab("table")}>{data.format === "league" ? "League table" : "Results"}</button><button className={tab === "pitch" ? "active" : ""} onClick={() => setTab("pitch")}>Pitch</button></div>
