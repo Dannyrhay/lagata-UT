@@ -40,6 +40,7 @@ const initial: Tournament = { name: "Friday Night League", players: demoPlayers,
 
 export default function Home() {
   const [data, setData] = useState<Tournament>(initial);
+  const [draft, setDraft] = useState<Pick<Tournament, "name" | "players">>({ name: initial.name, players: initial.players });
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState<"matches" | "table">("matches");
   const [round, setRound] = useState(1);
@@ -52,7 +53,7 @@ export default function Home() {
   }, []);
   useEffect(() => { if (ready) localStorage.setItem("fc-night-tournament", JSON.stringify(data)); }, [data, ready]);
 
-  const playerById = (id: string) => data.players.find((p) => p.id === id)!;
+  const playerById = (id: string) => data.players.find((p) => p.id === id);
   const maxRound = Math.max(1, ...data.matches.map((m) => m.round));
   const completed = data.matches.filter((m) => m.homeScore !== null && m.awayScore !== null).length;
   const progress = data.matches.length ? Math.round((completed / data.matches.length) * 100) : 0;
@@ -78,24 +79,29 @@ export default function Home() {
     setData((d) => ({ ...d, matches: d.matches.map((m) => m.id === id ? { ...m, [side]: score } : m) }));
   }
 
+  function openSetup() {
+    setDraft({ name: data.name, players: data.players.map((player) => ({ ...player })) });
+    setShowSetup(true);
+  }
+
   function regenerate() {
-    setData((d) => ({ ...d, matches: makeFixtures(d.players) }));
+    setData({ name: draft.name.trim() || "Friday Night League", players: draft.players, matches: makeFixtures(draft.players) });
     setRound(1); setShowSetup(false); setTab("matches");
   }
 
   function addPlayer() {
-    setData((d) => ({ ...d, players: [...d.players, { id: crypto.randomUUID(), name: `Player ${d.players.length + 1}`, team: "Choose club" }] }));
+    setDraft((d) => ({ ...d, players: [...d.players, { id: crypto.randomUUID(), name: `Player ${d.players.length + 1}`, team: "Choose club" }] }));
   }
 
   function updatePlayer(id: string, field: "name" | "team", value: string) {
-    setData((d) => ({ ...d, players: d.players.map((p) => p.id === id ? { ...p, [field]: value } : p) }));
+    setDraft((d) => ({ ...d, players: d.players.map((p) => p.id === id ? { ...p, [field]: value } : p) }));
   }
 
   return (
     <main>
       <header className="topbar">
-        <a className="brand" href="#"><span className="brandMark">F</span><span>FULL TIME</span></a>
-        <button className="ghostButton" onClick={() => setShowSetup(true)}>⚙ <span>Manage tournament</span></button>
+        <a className="brand" href="#"><span className="brandMark" aria-hidden="true"><i>L</i><b>UT</b></span><span>LAGATA <em>ULTIMATE TEAM</em></span></a>
+        <button className="ghostButton" onClick={openSetup}><span className="settingsGlyph" aria-hidden="true">•••</span><span>Manage tournament</span></button>
       </header>
 
       <section className="hero">
@@ -125,6 +131,7 @@ export default function Home() {
           <div className="matchList">
             {data.matches.filter((m) => m.round === round).map((m) => {
               const h = playerById(m.homeId), a = playerById(m.awayId);
+              if (!h || !a) return null;
               const played = m.homeScore !== null && m.awayScore !== null;
               return <article className="matchCard" key={m.id}>
                 <div className="matchMeta"><span>{played ? "FINAL" : "UP NEXT"}</span><i /><small>Match {data.matches.indexOf(m) + 1}</small></div>
@@ -151,14 +158,15 @@ export default function Home() {
 
       {showSetup && <div className="modalBack" onMouseDown={(e) => e.target === e.currentTarget && setShowSetup(false)}>
         <section className="modal" role="dialog" aria-modal="true" aria-labelledby="setup-title">
+          <div className="sheetHandle" aria-hidden="true" />
           <div className="modalHead"><div><p className="eyebrow">Tournament setup</p><h2 id="setup-title">Players & teams</h2></div><button aria-label="Close" onClick={() => setShowSetup(false)}>×</button></div>
-          <label className="nameField">Tournament name<input value={data.name} onChange={(e) => setData({ ...data, name: e.target.value })} /></label>
+          <label className="nameField">Tournament name<input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></label>
           <div className="playerEditor">
-            {data.players.map((p, i) => <div className="playerRow" key={p.id}><span>{i + 1}</span><input aria-label={`Player ${i + 1} name`} value={p.name} onChange={(e) => updatePlayer(p.id, "name", e.target.value)} /><input aria-label={`${p.name} team`} value={p.team} onChange={(e) => updatePlayer(p.id, "team", e.target.value)} /><button aria-label={`Remove ${p.name}`} disabled={data.players.length <= 2} onClick={() => setData((d) => ({ ...d, players: d.players.filter((x) => x.id !== p.id) }))}>×</button></div>)}
+            {draft.players.map((p, i) => <div className="playerRow" key={p.id}><span>{i + 1}</span><input aria-label={`Player ${i + 1} name`} value={p.name} onChange={(e) => updatePlayer(p.id, "name", e.target.value)} /><input aria-label={`${p.name} team`} value={p.team} onChange={(e) => updatePlayer(p.id, "team", e.target.value)} /><button aria-label={`Remove ${p.name}`} disabled={draft.players.length <= 2} onClick={() => setDraft((d) => ({ ...d, players: d.players.filter((x) => x.id !== p.id) }))}>×</button></div>)}
           </div>
           <button className="addButton" onClick={addPlayer}>＋ Add player</button>
           <div className="warning">Generating fixtures will clear any existing scores.</div>
-          <div className="modalActions"><button className="cancel" onClick={() => setShowSetup(false)}>Cancel</button><button className="primary" disabled={data.players.some((p) => !p.name.trim())} onClick={regenerate}>Randomise & generate fixtures</button></div>
+          <div className="modalActions"><button className="cancel" onClick={() => setShowSetup(false)}>Cancel</button><button className="primary" disabled={draft.players.some((p) => !p.name.trim())} onClick={regenerate}>Randomise & generate fixtures</button></div>
         </section>
       </div>}
     </main>
