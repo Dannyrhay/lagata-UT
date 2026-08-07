@@ -42,7 +42,16 @@ function advanceKnockout(matches: Match[]) {
   return result;
 }
 
-const initial: Tournament = { name: "Friday Night League", format: "league", players: demoPlayers, matches: makeFixtures(demoPlayers, "league") };
+const initialMatches: Match[] = [
+  { id: "demo-r1-m1", round: 1, homeId: "p1", awayId: "p4", homeScore: null, awayScore: null },
+  { id: "demo-r1-m2", round: 1, homeId: "p2", awayId: "p3", homeScore: null, awayScore: null },
+  { id: "demo-r2-m1", round: 2, homeId: "p1", awayId: "p3", homeScore: null, awayScore: null },
+  { id: "demo-r2-m2", round: 2, homeId: "p4", awayId: "p2", homeScore: null, awayScore: null },
+  { id: "demo-r3-m1", round: 3, homeId: "p1", awayId: "p2", homeScore: null, awayScore: null },
+  { id: "demo-r3-m2", round: 3, homeId: "p3", awayId: "p4", homeScore: null, awayScore: null },
+];
+
+const initial: Tournament = { name: "Friday Night League", format: "league", players: demoPlayers, matches: initialMatches };
 const API_BASE = "https://lagata-live-scores.benernestcass.chatgpt.site";
 
 export default function Home() {
