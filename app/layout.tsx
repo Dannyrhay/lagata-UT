@@ -10,9 +10,9 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Lagata Ultimate Team — FC Tournament Tracker",
     description: "Your tournament. Your table. Your ultimate team.",
-    images: [{ url: "/og-v2.png", width: 1200, height: 630, alt: "Lagata Ultimate Team tournament tracker" }],
+    images: [{ url: "/og-v3.png", width: 1200, height: 630, alt: "Lagata Ultimate Team live tournament tracker" }],
   },
-  twitter: { card: "summary_large_image", images: ["/og-v2.png"] },
+  twitter: { card: "summary_large_image", images: ["/og-v3.png"] },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
