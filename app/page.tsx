@@ -81,7 +81,7 @@ export default function Home() {
     rows.forEach((r) => r.gd = r.gf - r.ga); return rows.sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || a.name.localeCompare(b.name));
   }, [data]);
   const finalMatch = data.format === "knockout" ? data.matches.find((m) => m.round === maxRound && data.matches.filter((x) => x.round === maxRound).length === 1) : undefined;
-  const champion = finalMatch?.homeScore !== null && finalMatch?.awayScore !== null ? playerById(finalMatch.homeScore! > finalMatch.awayScore! ? finalMatch.homeId : finalMatch.awayId) : undefined;
+  const champion = finalMatch && finalMatch.homeScore !== null && finalMatch.awayScore !== null ? playerById(finalMatch.homeScore > finalMatch.awayScore ? finalMatch.homeId : finalMatch.awayId) : undefined;
 
   function updateScore(id: string, side: "homeScore" | "awayScore", value: string) { if (isViewer) return; const score = value === "" ? null : Math.max(0, Math.min(99, Number(value))); setData((d) => { const changed = d.matches.map((m) => m.id === id ? { ...m, [side]: score } : m); return { ...d, matches: d.format === "knockout" ? advanceKnockout(changed) : changed }; }); }
   function openSetup() { if (isViewer) return; setDraft({ name: data.name, players: data.players.map((p) => ({ ...p })), format: data.format }); setShowSetup(true); }
