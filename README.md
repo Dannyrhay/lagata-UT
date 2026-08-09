@@ -1,8 +1,10 @@
-# vinext-starter
+# lagata-UT
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Lagata Ultimate Team is a responsive FC tournament tracker for generating
+league or knockout fixtures, recording scores, calculating standings, and
+sharing live spectator or private admin links.
+
+Live site: https://lagata-ultimate-team.benernestcass.chatgpt.site
 
 ## Prerequisites
 
