@@ -120,6 +120,7 @@ td:nth-child(2) small { color:var(--muted); font-size:9px; margin-top:3px; }
 @media (max-width:760px) {
   body { padding-bottom:calc(76px + env(safe-area-inset-bottom)); background:#f2f2f7; }
   .topbar { height:auto; min-height:104px; padding:10px 12px; flex-wrap:wrap; align-content:center; gap:8px; border:0; background:#f2f2f7; }.brandMark { width:34px; height:34px; border-radius:10px; }.brand { gap:8px; }.topActions { width:100%; justify-content:space-between; gap:4px; }.ghostButton,.dashboardButton,.shareButton { min-height:40px; padding:0 9px; white-space:nowrap; font-size:9px; }.shareButton span { margin-right:4px; }.settingsGlyph { font-size:8px; }.iconButton { flex:0 0 40px; }.undoButton { display:none; }
+  .topbar:not(:has(.dashboardButton)) { min-height:62px; flex-wrap:nowrap; }.topbar:not(:has(.dashboardButton)) .topActions { width:auto; }
   .viewerBar { margin:4px 16px 0; border-radius:13px; }.viewerBar b { display:none; }
   .hero { display:block; min-height:auto; padding:24px 16px 18px; }.hero h1 { font-size:40px; line-height:1.02; letter-spacing:-.055em; }.subline { line-height:1.6; }
   .progressCard,.championCard { width:100%; margin-top:22px; border:0; border-radius:16px; padding:18px; box-shadow:none; }.progressTrack,.progressTrack i { border-radius:6px; }
