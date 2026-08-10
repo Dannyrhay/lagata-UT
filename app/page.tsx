@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { PwaExperience, PwaInstallButton, usePwa } from "./pwa";
 
 type Player = { id: string; name: string; team: string };
 type MatchStatus = "scheduled" | "live" | "finished" | "postponed";
@@ -142,7 +143,7 @@ function snapshotOf(value: Tournament) { const { history: _history, ...snapshot 
 function audited(previous: Tournament, next: Tournament, label: string): Tournament { return { ...next, history: [{ id: crypto.randomUUID(), at: new Date().toISOString(), label, snapshot: snapshotOf(previous) }, ...previous.history].slice(0, 40) }; }
 function readCatalog(): TournamentRef[] { try { return JSON.parse(localStorage.getItem("lagata-tournament-catalog") || "[]"); } catch { return []; } }
 
-function MatchCard({ match, matchNumber, format, players, isViewer, onScore, onResolution, onStatus }: { match: Match; matchNumber: number; format: Format; players: Player[]; isViewer: boolean; onScore: (id: string, side: "homeScore" | "awayScore", value: string) => void; onResolution: (id: string, field: "homeExtraTime" | "awayExtraTime" | "homePenalties" | "awayPenalties", value: string) => void; onStatus: (id: string, status: MatchStatus) => void }) {
+function MatchCard({ match, matchNumber, format, players, isViewer: isReadOnly, onScore, onResolution, onStatus }: { match: Match; matchNumber: number; format: Format; players: Player[]; isViewer: boolean; onScore: (id: string, side: "homeScore" | "awayScore", value: string) => void; onResolution: (id: string, field: "homeExtraTime" | "awayExtraTime" | "homePenalties" | "awayPenalties", value: string) => void; onStatus: (id: string, status: MatchStatus) => void }) {
   const home = players.find((player) => player.id === match.homeId);
   const away = players.find((player) => player.id === match.awayId);
   if (!home || !away) return null;
@@ -153,9 +154,9 @@ function MatchCard({ match, matchNumber, format, players, isViewer, onScore, onR
   const winner = format === "knockout" ? knockoutWinner(match) : null;
   const decision = format === "knockout" && match.status === "finished" ? knockoutDecision(match) : null;
   return <article className="matchCard">
-    <div className="matchMeta">{isViewer ? <span className={`statusBadge ${match.status}`}>{statusLabels[match.status]}</span> : <select className={`statusSelect ${match.status}`} aria-label={`Status for ${home.name} versus ${away.name}`} value={match.status} onChange={(event) => onStatus(match.id, event.target.value as MatchStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option value={value} disabled={format === "knockout" && value === "finished" && !winner} key={value}>{label}</option>)}</select>}<i />{decision && <span className="decisionBadge">{decision}</span>}<small>Match {matchNumber}</small></div>
-    <div className="matchup"><div className="player home"><div><strong>{home.name}</strong><small>{home.team}</small></div><span className="avatar">{home.name.slice(0, 2).toUpperCase()}</span></div><div className="scoreBox"><input readOnly={isViewer} aria-label={`${home.name} full-time score`} inputMode="numeric" value={match.homeScore ?? ""} placeholder="–" onChange={(event) => onScore(match.id, "homeScore", event.target.value)} /><b>:</b><input readOnly={isViewer} aria-label={`${away.name} full-time score`} inputMode="numeric" value={match.awayScore ?? ""} placeholder="–" onChange={(event) => onScore(match.id, "awayScore", event.target.value)} /></div><div className="player away"><span className="avatar alt">{away.name.slice(0, 2).toUpperCase()}</span><div><strong>{away.name}</strong><small>{away.team}</small></div></div></div>
-    {fullTimeDraw && <div className="knockoutResolution"><div className="resolutionIntro"><span>90&apos;</span><div><b>Level after full time</b><small>Enter extra-time goals to decide the tie.</small></div></div><div className="resolutionStage"><label>Extra time</label><div className="miniScore"><input readOnly={isViewer} aria-label={`${home.name} extra-time goals`} inputMode="numeric" value={match.homeExtraTime ?? ""} placeholder="–" onChange={(event) => onResolution(match.id, "homeExtraTime", event.target.value)} /><b>:</b><input readOnly={isViewer} aria-label={`${away.name} extra-time goals`} inputMode="numeric" value={match.awayExtraTime ?? ""} placeholder="–" onChange={(event) => onResolution(match.id, "awayExtraTime", event.target.value)} /></div></div>{extraTimeDraw && <div className="resolutionStage penalties"><label>Penalties</label><div className="miniScore"><input readOnly={isViewer} aria-label={`${home.name} penalties`} inputMode="numeric" value={match.homePenalties ?? ""} placeholder="–" onChange={(event) => onResolution(match.id, "homePenalties", event.target.value)} /><b>:</b><input readOnly={isViewer} aria-label={`${away.name} penalties`} inputMode="numeric" value={match.awayPenalties ?? ""} placeholder="–" onChange={(event) => onResolution(match.id, "awayPenalties", event.target.value)} /></div></div>}{penaltiesReady && match.homePenalties === match.awayPenalties && <p className="resolutionError">Penalties must produce a winner.</p>}</div>}
+    <div className="matchMeta">{isReadOnly ? <span className={`statusBadge ${match.status}`}>{statusLabels[match.status]}</span> : <select className={`statusSelect ${match.status}`} aria-label={`Status for ${home.name} versus ${away.name}`} value={match.status} onChange={(event) => onStatus(match.id, event.target.value as MatchStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option value={value} disabled={format === "knockout" && value === "finished" && !winner} key={value}>{label}</option>)}</select>}<i />{decision && <span className="decisionBadge">{decision}</span>}<small>Match {matchNumber}</small></div>
+    <div className="matchup"><div className="player home"><div><strong>{home.name}</strong><small>{home.team}</small></div><span className="avatar">{home.name.slice(0, 2).toUpperCase()}</span></div><div className="scoreBox"><input readOnly={isReadOnly} aria-label={`${home.name} full-time score`} inputMode="numeric" value={match.homeScore ?? ""} placeholder="–" onChange={(event) => onScore(match.id, "homeScore", event.target.value)} /><b>:</b><input readOnly={isReadOnly} aria-label={`${away.name} full-time score`} inputMode="numeric" value={match.awayScore ?? ""} placeholder="–" onChange={(event) => onScore(match.id, "awayScore", event.target.value)} /></div><div className="player away"><span className="avatar alt">{away.name.slice(0, 2).toUpperCase()}</span><div><strong>{away.name}</strong><small>{away.team}</small></div></div></div>
+    {fullTimeDraw && <div className="knockoutResolution"><div className="resolutionIntro"><span>90&apos;</span><div><b>Level after full time</b><small>Enter extra-time goals to decide the tie.</small></div></div><div className="resolutionStage"><label>Extra time</label><div className="miniScore"><input readOnly={isReadOnly} aria-label={`${home.name} extra-time goals`} inputMode="numeric" value={match.homeExtraTime ?? ""} placeholder="–" onChange={(event) => onResolution(match.id, "homeExtraTime", event.target.value)} /><b>:</b><input readOnly={isReadOnly} aria-label={`${away.name} extra-time goals`} inputMode="numeric" value={match.awayExtraTime ?? ""} placeholder="–" onChange={(event) => onResolution(match.id, "awayExtraTime", event.target.value)} /></div></div>{extraTimeDraw && <div className="resolutionStage penalties"><label>Penalties</label><div className="miniScore"><input readOnly={isReadOnly} aria-label={`${home.name} penalties`} inputMode="numeric" value={match.homePenalties ?? ""} placeholder="–" onChange={(event) => onResolution(match.id, "homePenalties", event.target.value)} /><b>:</b><input readOnly={isReadOnly} aria-label={`${away.name} penalties`} inputMode="numeric" value={match.awayPenalties ?? ""} placeholder="–" onChange={(event) => onResolution(match.id, "awayPenalties", event.target.value)} /></div></div>}{penaltiesReady && match.homePenalties === match.awayPenalties && <p className="resolutionError">Penalties must produce a winner.</p>}</div>}
   </article>;
 }
 
@@ -180,6 +181,7 @@ function ChampionCelebration({ champion, onClose }: { champion: Player; onClose:
 }
 
 export default function Home() {
+  const pwa = usePwa();
   const [data, setData] = useState<Tournament>(initial);
   const [draft, setDraft] = useState<Pick<Tournament, "name" | "players" | "format" | "homeAndAway">>({ name: initial.name, players: initial.players, format: initial.format, homeAndAway: initial.homeAndAway });
   const [ready, setReady] = useState(false); const [tab, setTab] = useState<"matches" | "table" | "stats" | "pitch">("matches");
@@ -195,36 +197,40 @@ export default function Home() {
     const params = new URLSearchParams(location.search); const tournamentId = params.get("t") || "";
     const adminToken = new URLSearchParams(location.hash.slice(1)).get("admin") || "";
     const storedId = localStorage.getItem("lagata-current-tournament") || "";
-    const activeId = tournamentId || storedId;
+    const standalone = matchMedia("(display-mode: standalone)").matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+    const lastViewedId = localStorage.getItem("lagata-last-tournament") || "";
+    const activeId = tournamentId || storedId || (standalone ? lastViewedId : "");
     if (activeId) {
       const token = adminToken || localStorage.getItem(`lagata-edit-${activeId}`) || "";
       if (adminToken) { localStorage.setItem("lagata-current-tournament", activeId); localStorage.setItem(`lagata-edit-${activeId}`, adminToken); history.replaceState({}, "", `${location.pathname}?t=${activeId}`); }
+      localStorage.setItem("lagata-last-tournament", activeId);
       setShareId(activeId); setEditToken(token);
-      fetch(`${API_BASE}/api/tournament?id=${encodeURIComponent(activeId)}`).then((r) => r.ok ? r.json() : Promise.reject()).then(({ tournament }) => { const normalised = normaliseTournament(tournament); setData(normalised); if (token) rememberTournament(activeId, normalised.name); cloudLoaded.current = true; setReady(true); }).catch(() => { if (!tournamentId) { localStorage.removeItem("lagata-current-tournament"); setShareId(""); setEditToken(""); } setReady(true); });
+      fetch(`${API_BASE}/api/tournament?id=${encodeURIComponent(activeId)}`).then((r) => r.ok ? r.json() : Promise.reject()).then(({ tournament }) => { const normalised = normaliseTournament(tournament); setData(normalised); localStorage.setItem(`lagata-cached-tournament-${activeId}`, JSON.stringify(normalised)); if (token) rememberTournament(activeId, normalised.name); cloudLoaded.current = true; setReady(true); }).catch(() => { const cached = localStorage.getItem(`lagata-cached-tournament-${activeId}`); if (cached) try { setData(normaliseTournament(JSON.parse(cached))); cloudLoaded.current = true; } catch {} setReady(true); });
     } else { const saved = localStorage.getItem("fc-night-tournament"); if (saved) try { setData(normaliseTournament(JSON.parse(saved))); } catch {} setReady(true); }
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("lagata-theme", theme); }, [theme]);
+  useEffect(() => { if (ready && shareId) { localStorage.setItem("lagata-last-tournament", shareId); localStorage.setItem(`lagata-cached-tournament-${shareId}`, JSON.stringify(data)); } }, [data, ready, shareId]);
   useEffect(() => {
-    if (!ready || shareId || creatingCloud.current) return;
+    if (!ready || shareId || creatingCloud.current || !pwa.isOnline) return;
     creatingCloud.current = true;
     setShareState("saving");
     fetch(`${API_BASE}/api/tournament`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tournament: data }) })
       .then((r) => r.ok ? r.json() : Promise.reject())
       .then((result) => { localStorage.setItem("lagata-current-tournament", result.id); localStorage.setItem(`lagata-edit-${result.id}`, result.editToken); localStorage.removeItem("fc-night-tournament"); rememberTournament(result.id, data.name); setShareId(result.id); setEditToken(result.editToken); cloudLoaded.current = true; setShareState("idle"); })
       .catch(() => { creatingCloud.current = false; setShareState("error"); });
-  }, [data, ready, shareId]);
+  }, [data, ready, shareId, pwa.isOnline]);
   useEffect(() => {
-    if (!shareId || !editToken || !cloudLoaded.current) return;
+    if (!shareId || !editToken || !cloudLoaded.current || !pwa.isOnline) return;
     setShareState("saving"); const timer = setTimeout(() => fetch(`${API_BASE}/api/tournament?id=${encodeURIComponent(shareId)}`, { method: "PUT", headers: { "content-type": "application/json", "x-edit-token": editToken }, body: JSON.stringify({ tournament: data }) }).then((r) => { if (!r.ok) throw new Error(); rememberTournament(shareId, data.name); setShareState("idle"); notify("Changes saved"); }).catch(() => { setShareState("error"); notify("Cloud save failed — your changes need retrying", "error"); }), 650);
     return () => clearTimeout(timer);
-  }, [data, shareId, editToken]);
+  }, [data, shareId, editToken, pwa.isOnline]);
   useEffect(() => {
-    if (!shareId || editToken) return; const refresh = () => fetch(`${API_BASE}/api/tournament?id=${encodeURIComponent(shareId)}`).then((r) => r.json()).then(({ tournament }) => tournament && setData(normaliseTournament(tournament))).catch(() => {});
+    if (!shareId || editToken || !pwa.isOnline) return; const refresh = () => fetch(`${API_BASE}/api/tournament?id=${encodeURIComponent(shareId)}`).then((r) => r.json()).then(({ tournament }) => tournament && setData(normaliseTournament(tournament))).catch(() => {});
     const timer = setInterval(refresh, 5000); return () => clearInterval(timer);
-  }, [shareId, editToken]);
+  }, [shareId, editToken, pwa.isOnline]);
 
   const sharingAvailable = true;
-  const isViewer = Boolean(shareId && !editToken); const playerById = (id: string) => data.players.find((p) => p.id === id);
+  const isSpectator = Boolean(shareId && !editToken); const isViewer = isSpectator || !pwa.isOnline; const playerById = (id: string) => data.players.find((p) => p.id === id);
   const maxRound = Math.max(1, ...data.matches.map((m) => m.round)); const playedMatches = data.matches.filter((m) => m.homeScore !== null && m.awayScore !== null); const completed = playedMatches.filter((m) => m.status === "finished").length;
   const totalRounds = data.format === "knockout" ? Math.max(1, Math.log2(data.players.length)) : maxRound;
   const progress = data.matches.length ? Math.round((completed / data.matches.length) * 100) : 0;
@@ -366,6 +372,8 @@ export default function Home() {
   function toggleArchive(id: string) { setCatalog((current) => { const next = current.map((item) => item.id === id ? { ...item, archived: !item.archived } : item); localStorage.setItem("lagata-tournament-catalog", JSON.stringify(next)); return next; }); }
 
   return <main>
+    <PwaInstallButton pwa={pwa} />
+    <PwaExperience pwa={pwa} />
     <header className="topbar"><a className="brand" href="#"><span className="brandMark" aria-hidden="true"><i>L</i><b>UT</b></span><span>LAGATA <em>ULTIMATE TEAM</em></span></a><div className="topActions">{!isViewer && <button className="dashboardButton" onClick={() => setShowDashboard(true)}><span aria-hidden="true">▦</span><span>Tournaments</span></button>}{!isViewer && data.history.length > 0 && <button className="undoButton" onClick={undoLast} title={data.history[0].label}>↶ Undo</button>}<button className="iconButton" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={`Use ${theme === "light" ? "dark" : "light"} mode`}>{theme === "light" ? "◐" : "☀"}</button>{!isViewer && sharingAvailable && <button className="shareButton" disabled={shareState === "saving"} onClick={shareTournament}><span aria-hidden="true">↗</span>{shareState === "copied" ? "Link copied" : shareState === "saving" ? "Saving…" : shareId ? "Copy link" : "Share live"}</button>}{!isViewer && <button className="ghostButton" onClick={() => openSetup()} aria-label="Manage tournament"><span className="settingsGlyph" aria-hidden="true">•••</span><span>Manage tournament</span></button>}{!isViewer && <button className="mobileMore" onClick={() => setShowMobileMenu((open) => !open)} aria-expanded={showMobileMenu}><span aria-hidden="true">•••</span><span>More</span></button>}</div></header>
     {showMobileMenu && !isViewer && <div className="mobileActionMenu"><button onClick={() => { setTheme(theme === "light" ? "dark" : "light"); setShowMobileMenu(false); }}><span>{theme === "light" ? "◐" : "☀"}</span>{theme === "light" ? "Dark mode" : "Light mode"}</button><button onClick={() => openSetup()}><span>⚙</span>Manage tournament</button>{data.history.length > 0 && <button onClick={() => { undoLast(); setShowMobileMenu(false); }}><span>↶</span>Undo latest change</button>}</div>}
     {isViewer && <div className="viewerBar"><span className="liveDot" tabIndex={0} role="status" aria-label="Live updates active" data-label="Live updates active" /> Live spectator view <b>Scores refresh automatically</b></div>}
