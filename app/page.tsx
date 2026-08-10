@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PwaExperience, PwaInstallButton, usePwa } from "./pwa";
+import { PwaConnect, PwaExperience, PwaInstallButton, usePwa } from "./pwa";
 
 type Player = { id: string; name: string; team: string };
 type MatchStatus = "scheduled" | "live" | "finished" | "postponed";
@@ -187,6 +187,7 @@ export default function Home() {
   const [ready, setReady] = useState(false); const [tab, setTab] = useState<"matches" | "table" | "stats" | "pitch">("matches");
   const [round, setRound] = useState(1); const [showSetup, setShowSetup] = useState(false); const [settingsTab, setSettingsTab] = useState<"setup" | "access" | "data" | "history">("setup"); const [showDashboard, setShowDashboard] = useState(false); const [showMobileMenu, setShowMobileMenu] = useState(false); const [compactMode, setCompactMode] = useState(false); const [toast, setToast] = useState<{ message: string; tone?: "success" | "error" } | null>(null); const [catalog, setCatalog] = useState<TournamentRef[]>([]); const importRef = useRef<HTMLInputElement>(null); const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showChampionCelebration, setShowChampionCelebration] = useState(false); const previousFinalState = useRef<string | null>(null); const celebratedFinalResult = useRef(""); const celebrationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [needsPwaConnection, setNeedsPwaConnection] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light"); const [shareId, setShareId] = useState(""); const [editToken, setEditToken] = useState("");
   const [shareState, setShareState] = useState<"idle" | "saving" | "copied" | "error">("idle"); const [adminCopyState, setAdminCopyState] = useState<"idle" | "copied" | "error">("idle"); const cloudLoaded = useRef(false); const creatingCloud = useRef(false);
 
@@ -206,19 +207,20 @@ export default function Home() {
       localStorage.setItem("lagata-last-tournament", activeId);
       setShareId(activeId); setEditToken(token);
       fetch(`${API_BASE}/api/tournament?id=${encodeURIComponent(activeId)}`).then((r) => r.ok ? r.json() : Promise.reject()).then(({ tournament }) => { const normalised = normaliseTournament(tournament); setData(normalised); localStorage.setItem(`lagata-cached-tournament-${activeId}`, JSON.stringify(normalised)); if (token) rememberTournament(activeId, normalised.name); cloudLoaded.current = true; setReady(true); }).catch(() => { const cached = localStorage.getItem(`lagata-cached-tournament-${activeId}`); if (cached) try { setData(normaliseTournament(JSON.parse(cached))); cloudLoaded.current = true; } catch {} setReady(true); });
-    } else { const saved = localStorage.getItem("fc-night-tournament"); if (saved) try { setData(normaliseTournament(JSON.parse(saved))); } catch {} setReady(true); }
+    } else if (standalone) { setNeedsPwaConnection(true); setReady(true); }
+    else { const saved = localStorage.getItem("fc-night-tournament"); if (saved) try { setData(normaliseTournament(JSON.parse(saved))); } catch {} setReady(true); }
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("lagata-theme", theme); }, [theme]);
   useEffect(() => { if (ready && shareId) { localStorage.setItem("lagata-last-tournament", shareId); localStorage.setItem(`lagata-cached-tournament-${shareId}`, JSON.stringify(data)); } }, [data, ready, shareId]);
   useEffect(() => {
-    if (!ready || shareId || creatingCloud.current || !pwa.isOnline) return;
+    if (!ready || shareId || creatingCloud.current || !pwa.isOnline || needsPwaConnection) return;
     creatingCloud.current = true;
     setShareState("saving");
     fetch(`${API_BASE}/api/tournament`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tournament: data }) })
       .then((r) => r.ok ? r.json() : Promise.reject())
       .then((result) => { localStorage.setItem("lagata-current-tournament", result.id); localStorage.setItem(`lagata-edit-${result.id}`, result.editToken); localStorage.removeItem("fc-night-tournament"); rememberTournament(result.id, data.name); setShareId(result.id); setEditToken(result.editToken); cloudLoaded.current = true; setShareState("idle"); })
       .catch(() => { creatingCloud.current = false; setShareState("error"); });
-  }, [data, ready, shareId, pwa.isOnline]);
+  }, [data, ready, shareId, pwa.isOnline, needsPwaConnection]);
   useEffect(() => {
     if (!shareId || !editToken || !cloudLoaded.current || !pwa.isOnline) return;
     setShareState("saving"); const timer = setTimeout(() => fetch(`${API_BASE}/api/tournament?id=${encodeURIComponent(shareId)}`, { method: "PUT", headers: { "content-type": "application/json", "x-edit-token": editToken }, body: JSON.stringify({ tournament: data }) }).then((r) => { if (!r.ok) throw new Error(); rememberTournament(shareId, data.name); setShareState("idle"); notify("Changes saved"); }).catch(() => { setShareState("error"); notify("Cloud save failed — your changes need retrying", "error"); }), 650);
@@ -370,10 +372,35 @@ export default function Home() {
   function createTournament() { const fresh: Tournament = { ...initial, name: "New Tournament", players: initial.players.map((p) => ({ ...p })), matches: initialMatches.map((m) => ({ ...m })), history: [] }; localStorage.removeItem("lagata-current-tournament"); setData(fresh); setShareId(""); setEditToken(""); cloudLoaded.current = false; creatingCloud.current = false; history.replaceState({}, "", location.pathname); setRound(1); setTab("matches"); setShowDashboard(false); }
   async function openTournament(id: string) { const token = localStorage.getItem(`lagata-edit-${id}`) || ""; try { const response = await fetch(`${API_BASE}/api/tournament?id=${encodeURIComponent(id)}`); if (!response.ok) throw new Error(); const result = await response.json(); setData(normaliseTournament(result.tournament)); setShareId(id); setEditToken(token); cloudLoaded.current = true; localStorage.setItem("lagata-current-tournament", id); history.replaceState({}, "", `${location.pathname}?t=${id}`); setRound(1); setTab("matches"); setShowDashboard(false); } catch { setShareState("error"); } }
   function toggleArchive(id: string) { setCatalog((current) => { const next = current.map((item) => item.id === id ? { ...item, archived: !item.archived } : item); localStorage.setItem("lagata-tournament-catalog", JSON.stringify(next)); return next; }); }
+  async function connectPwaTournament(value: string) {
+    const raw = value.trim();
+    let id = ""; let token = "";
+    if (/^[a-z0-9_-]{6,64}$/i.test(raw)) id = raw;
+    else try { const url = new URL(raw); id = url.searchParams.get("t") || ""; token = new URLSearchParams(url.hash.slice(1)).get("admin") || ""; } catch { throw new Error("Paste a complete Lagata link or a valid tournament code."); }
+    if (!id) throw new Error("This link does not contain a tournament ID.");
+    const response = await fetch(`${API_BASE}/api/tournament?id=${encodeURIComponent(id)}`);
+    if (!response.ok) throw new Error(response.status === 404 ? "That tournament could not be found." : "Lagata could not download that tournament. Try again.");
+    const result = await response.json();
+    if (!result.tournament) throw new Error("That link does not contain a valid Lagata tournament.");
+    if (token) { const validation = await fetch(`${API_BASE}/api/tournament?id=${encodeURIComponent(id)}`, { method: "PUT", headers: { "content-type": "application/json", "x-edit-token": token }, body: JSON.stringify({ tournament: result.tournament }) }); if (!validation.ok) throw new Error("That private admin link is invalid or has expired."); }
+    const normalised = normaliseTournament(result.tournament);
+    const connectedRounds = normalised.format === "knockout" ? Math.max(1, Math.log2(normalised.players.length)) : Math.max(1, ...normalised.matches.map((match) => match.round));
+    const connectedFinal = normalised.format === "knockout" ? normalised.matches.find((match) => match.round === connectedRounds && normalised.matches.filter((candidate) => candidate.round === connectedRounds).length === 1) : undefined;
+    const connectedChampion = connectedFinal ? confirmedKnockoutWinner(connectedFinal) : null;
+    previousFinalState.current = connectedFinal ? `${connectedFinal.id}:${connectedFinal.status}:${connectedChampion || ""}` : "none"; celebratedFinalResult.current = connectedFinal && connectedChampion ? `${connectedFinal.id}:${connectedChampion}` : ""; setShowChampionCelebration(false);
+    localStorage.setItem("lagata-current-tournament", id); localStorage.setItem("lagata-last-tournament", id); localStorage.setItem(`lagata-cached-tournament-${id}`, JSON.stringify(normalised));
+    if (token) localStorage.setItem(`lagata-edit-${id}`, token); else localStorage.removeItem(`lagata-edit-${id}`);
+    setData(normalised); setShareId(id); setEditToken(token); cloudLoaded.current = true; creatingCloud.current = false; setNeedsPwaConnection(false); setRound(1); setTab("matches"); history.replaceState({}, "", `${location.pathname}?t=${id}`);
+    if (token) rememberTournament(id, normalised.name);
+    notify(token ? "Admin access connected on this device" : "Spectator tournament connected");
+  }
+  function beginPwaTournament() { localStorage.removeItem("lagata-current-tournament"); localStorage.removeItem("lagata-last-tournament"); setData({ ...initial, players: initial.players.map((player) => ({ ...player })), matches: initialMatches.map((match) => ({ ...match })), history: [] }); setShareId(""); setEditToken(""); cloudLoaded.current = false; creatingCloud.current = false; setNeedsPwaConnection(false); setRound(1); setTab("matches"); }
 
   return <main>
     <PwaInstallButton pwa={pwa} />
     <PwaExperience pwa={pwa} />
+    {pwa.isStandalone && !needsPwaConnection && <button className="pwaConnectLauncher" onClick={() => setNeedsPwaConnection(true)}><span aria-hidden="true">↗</span> Switch tournament</button>}
+    {needsPwaConnection && <PwaConnect canClose={Boolean(shareId)} isOnline={pwa.isOnline} onClose={() => setNeedsPwaConnection(false)} onConnect={connectPwaTournament} onCreate={beginPwaTournament} />}
     <header className="topbar"><a className="brand" href="#"><span className="brandMark" aria-hidden="true"><i>L</i><b>UT</b></span><span>LAGATA <em>ULTIMATE TEAM</em></span></a><div className="topActions">{!isViewer && <button className="dashboardButton" onClick={() => setShowDashboard(true)}><span aria-hidden="true">▦</span><span>Tournaments</span></button>}{!isViewer && data.history.length > 0 && <button className="undoButton" onClick={undoLast} title={data.history[0].label}>↶ Undo</button>}<button className="iconButton" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={`Use ${theme === "light" ? "dark" : "light"} mode`}>{theme === "light" ? "◐" : "☀"}</button>{!isViewer && sharingAvailable && <button className="shareButton" disabled={shareState === "saving"} onClick={shareTournament}><span aria-hidden="true">↗</span>{shareState === "copied" ? "Link copied" : shareState === "saving" ? "Saving…" : shareId ? "Copy link" : "Share live"}</button>}{!isViewer && <button className="ghostButton" onClick={() => openSetup()} aria-label="Manage tournament"><span className="settingsGlyph" aria-hidden="true">•••</span><span>Manage tournament</span></button>}{!isViewer && <button className="mobileMore" onClick={() => setShowMobileMenu((open) => !open)} aria-expanded={showMobileMenu}><span aria-hidden="true">•••</span><span>More</span></button>}</div></header>
     {showMobileMenu && !isViewer && <div className="mobileActionMenu"><button onClick={() => { setTheme(theme === "light" ? "dark" : "light"); setShowMobileMenu(false); }}><span>{theme === "light" ? "◐" : "☀"}</span>{theme === "light" ? "Dark mode" : "Light mode"}</button><button onClick={() => openSetup()}><span>⚙</span>Manage tournament</button>{data.history.length > 0 && <button onClick={() => { undoLast(); setShowMobileMenu(false); }}><span>↶</span>Undo latest change</button>}</div>}
     {isViewer && <div className="viewerBar"><span className="liveDot" tabIndex={0} role="status" aria-label="Live updates active" data-label="Live updates active" /> Live spectator view <b>Scores refresh automatically</b></div>}

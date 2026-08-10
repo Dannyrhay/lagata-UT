@@ -46,3 +46,17 @@ test("ships a versioned offline shell and complete icon set", async () => {
     "icon-512-maskable.png",
   ].map((name) => access(new URL(`../public/icons/${name}`, import.meta.url))));
 });
+
+test("includes the installed-app tournament handoff safeguards", async () => {
+  const [page, pwa] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/pwa.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /else if \(standalone\).*setNeedsPwaConnection\(true\)/s);
+  assert.match(page, /x-edit-token/);
+  assert.match(page, /private admin link is invalid or has expired/i);
+  assert.match(page, /lagata-cached-tournament-/);
+  assert.match(pwa, /Bring your tournament onto this iPhone/);
+  assert.match(pwa, /Create a new tournament instead/);
+  assert.match(pwa, /element\.inert = true/);
+});
