@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 type Player = { id: string; name: string; team: string };
 type MatchStatus = "scheduled" | "live" | "finished" | "postponed";
-type Match = { id: string; round: number; homeId: string; awayId: string; homeScore: number | null; awayScore: number | null; status: MatchStatus };
+type Match = { id: string; round: number; homeId: string; awayId: string; homeScore: number | null; awayScore: number | null; homeExtraTime?: number | null; awayExtraTime?: number | null; homePenalties?: number | null; awayPenalties?: number | null; status: MatchStatus };
 type Format = "league" | "knockout";
 type AuditEntry = { id: string; at: string; label: string; snapshot: string };
 type Tournament = { name: string; format: Format; homeAndAway: boolean; players: Player[]; matches: Match[]; history: AuditEntry[] };
@@ -44,12 +44,72 @@ function makeFixtures(players: Player[], format: Format, homeAndAway = false): M
   }))];
 }
 
+function knockoutWinner(match: Match) {
+  if (match.homeScore === null || match.awayScore === null) return null;
+  if (match.homeScore !== match.awayScore) return match.homeScore > match.awayScore ? match.homeId : match.awayId;
+  if (match.homeExtraTime === null || match.homeExtraTime === undefined || match.awayExtraTime === null || match.awayExtraTime === undefined) return null;
+  const homeAfterExtraTime = match.homeScore + match.homeExtraTime;
+  const awayAfterExtraTime = match.awayScore + match.awayExtraTime;
+  if (homeAfterExtraTime !== awayAfterExtraTime) return homeAfterExtraTime > awayAfterExtraTime ? match.homeId : match.awayId;
+  if (match.homePenalties === null || match.homePenalties === undefined || match.awayPenalties === null || match.awayPenalties === undefined || match.homePenalties === match.awayPenalties) return null;
+  return match.homePenalties > match.awayPenalties ? match.homeId : match.awayId;
+}
+
+function confirmedKnockoutWinner(match: Match) {
+  return match.status === "finished" ? knockoutWinner(match) : null;
+}
+
+function knockoutDecision(match: Match) {
+  if (!knockoutWinner(match)) return null;
+  if (match.homeScore !== match.awayScore) return "FT";
+  const homeAfterExtraTime = match.homeScore! + (match.homeExtraTime || 0);
+  const awayAfterExtraTime = match.awayScore! + (match.awayExtraTime || 0);
+  return homeAfterExtraTime !== awayAfterExtraTime ? "AET" : "PENS";
+}
+
+function knockoutScoreline(match: Match) {
+  if (match.homeScore === null || match.awayScore === null) return "Awaiting result";
+  const extraTimeReady = match.homeExtraTime !== null && match.homeExtraTime !== undefined && match.awayExtraTime !== null && match.awayExtraTime !== undefined;
+  const homeTotal = match.homeScore + (extraTimeReady ? match.homeExtraTime! : 0);
+  const awayTotal = match.awayScore + (extraTimeReady ? match.awayExtraTime! : 0);
+  if (knockoutDecision(match) === "PENS") return `${homeTotal}–${awayTotal} · ${match.homePenalties}–${match.awayPenalties} pens`;
+  return `${homeTotal}–${awayTotal}${knockoutDecision(match) === "AET" ? " AET" : ""}`;
+}
+
+function knockoutRoundLabel(roundNumber: number, totalRounds: number) {
+  const roundsRemaining = totalRounds - roundNumber;
+  if (roundsRemaining === 0) return "Final";
+  if (roundsRemaining === 1) return "Semi-finals";
+  if (roundsRemaining === 2) return "Quarter-finals";
+  return `Round ${roundNumber}`;
+}
+
 function advanceKnockout(matches: Match[]) {
-  const result = [...matches]; const lastRound = Math.max(...result.map((m) => m.round));
-  const current = result.filter((m) => m.round === lastRound);
-  if (current.length <= 1 || current.some((m) => m.homeScore === null || m.awayScore === null)) return result;
-  const winners = current.map((m) => (m.homeScore! > m.awayScore! ? m.homeId : m.awayId));
-  for (let i = 0; i < winners.length; i += 2) result.push({ id: crypto.randomUUID(), round: lastRound + 1, homeId: winners[i], awayId: winners[i + 1], homeScore: null, awayScore: null, status: "scheduled" });
+  let result = matches.map((match) => ({ ...match }));
+  let round = 1;
+  while (true) {
+    const current = result.filter((match) => match.round === round);
+    if (current.length <= 1) break;
+    const winners = current.map(confirmedKnockoutWinner);
+    if (winners.some((winner) => !winner)) {
+      result = result.filter((match) => match.round <= round);
+      break;
+    }
+    const pairCount = winners.length / 2;
+    const nextRound = result.filter((match) => match.round === round + 1);
+    if (nextRound.length !== pairCount) {
+      result = result.filter((match) => match.round <= round);
+      for (let i = 0; i < winners.length; i += 2) result.push({ id: crypto.randomUUID(), round: round + 1, homeId: winners[i]!, awayId: winners[i + 1]!, homeScore: null, awayScore: null, homeExtraTime: null, awayExtraTime: null, homePenalties: null, awayPenalties: null, status: "scheduled" });
+    } else {
+      result = result.map((match) => {
+        if (match.round !== round + 1) return match;
+        const index = nextRound.findIndex((candidate) => candidate.id === match.id);
+        const homeId = winners[index * 2]!, awayId = winners[index * 2 + 1]!;
+        return match.homeId === homeId && match.awayId === awayId ? match : { ...match, homeId, awayId, homeScore: null, awayScore: null, homeExtraTime: null, awayExtraTime: null, homePenalties: null, awayPenalties: null, status: "scheduled" };
+      });
+    }
+    round++;
+  }
   return result;
 }
 
@@ -67,18 +127,64 @@ const API_BASE = "https://lagata-live-scores.benernestcass.chatgpt.site";
 const statusLabels: Record<MatchStatus, string> = { scheduled: "Scheduled", live: "Live", finished: "Finished", postponed: "Postponed" };
 
 function normaliseTournament(value: Partial<Tournament>): Tournament {
-  const matches = (value.matches || []).map((match) => ({ ...match, status: match.status || (match.homeScore !== null && match.awayScore !== null ? "finished" : "scheduled") }));
-  return { name: value.name || "Friday Night League", format: value.format || "league", homeAndAway: Boolean(value.homeAndAway), players: value.players || [], matches, history: Array.isArray(value.history) ? value.history : [] };
+  const format = value.format || "league";
+  const normalisedMatches = (value.matches || []).map((match) => {
+    const normalised = { ...match, homeExtraTime: match.homeExtraTime ?? null, awayExtraTime: match.awayExtraTime ?? null, homePenalties: match.homePenalties ?? null, awayPenalties: match.awayPenalties ?? null };
+    const hasScore = normalised.homeScore !== null && normalised.awayScore !== null;
+    const resolved = format === "knockout" ? Boolean(knockoutWinner(normalised)) : hasScore;
+    const status = match.status === "postponed" ? "postponed" : format === "league" ? resolved ? "finished" : hasScore ? "live" : match.status || "scheduled" : match.status === "finished" && resolved ? "finished" : hasScore ? "live" : "scheduled";
+    return { ...normalised, status } as Match;
+  });
+  const matches = format === "knockout" ? advanceKnockout(normalisedMatches) : normalisedMatches;
+  return { name: value.name || "Friday Night League", format, homeAndAway: Boolean(value.homeAndAway), players: value.players || [], matches, history: Array.isArray(value.history) ? value.history : [] };
 }
 function snapshotOf(value: Tournament) { const { history: _history, ...snapshot } = value; return JSON.stringify(snapshot); }
 function audited(previous: Tournament, next: Tournament, label: string): Tournament { return { ...next, history: [{ id: crypto.randomUUID(), at: new Date().toISOString(), label, snapshot: snapshotOf(previous) }, ...previous.history].slice(0, 40) }; }
 function readCatalog(): TournamentRef[] { try { return JSON.parse(localStorage.getItem("lagata-tournament-catalog") || "[]"); } catch { return []; } }
+
+function MatchCard({ match, matchNumber, format, players, isViewer, onScore, onResolution, onStatus }: { match: Match; matchNumber: number; format: Format; players: Player[]; isViewer: boolean; onScore: (id: string, side: "homeScore" | "awayScore", value: string) => void; onResolution: (id: string, field: "homeExtraTime" | "awayExtraTime" | "homePenalties" | "awayPenalties", value: string) => void; onStatus: (id: string, status: MatchStatus) => void }) {
+  const home = players.find((player) => player.id === match.homeId);
+  const away = players.find((player) => player.id === match.awayId);
+  if (!home || !away) return null;
+  const fullTimeDraw = format === "knockout" && match.homeScore !== null && match.awayScore !== null && match.homeScore === match.awayScore;
+  const extraTimeReady = fullTimeDraw && match.homeExtraTime !== null && match.homeExtraTime !== undefined && match.awayExtraTime !== null && match.awayExtraTime !== undefined;
+  const extraTimeDraw = extraTimeReady && match.homeScore! + match.homeExtraTime! === match.awayScore! + match.awayExtraTime!;
+  const penaltiesReady = extraTimeDraw && match.homePenalties !== null && match.homePenalties !== undefined && match.awayPenalties !== null && match.awayPenalties !== undefined;
+  const winner = format === "knockout" ? knockoutWinner(match) : null;
+  const decision = format === "knockout" && match.status === "finished" ? knockoutDecision(match) : null;
+  return <article className="matchCard">
+    <div className="matchMeta">{isViewer ? <span className={`statusBadge ${match.status}`}>{statusLabels[match.status]}</span> : <select className={`statusSelect ${match.status}`} aria-label={`Status for ${home.name} versus ${away.name}`} value={match.status} onChange={(event) => onStatus(match.id, event.target.value as MatchStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option value={value} disabled={format === "knockout" && value === "finished" && !winner} key={value}>{label}</option>)}</select>}<i />{decision && <span className="decisionBadge">{decision}</span>}<small>Match {matchNumber}</small></div>
+    <div className="matchup"><div className="player home"><div><strong>{home.name}</strong><small>{home.team}</small></div><span className="avatar">{home.name.slice(0, 2).toUpperCase()}</span></div><div className="scoreBox"><input readOnly={isViewer} aria-label={`${home.name} full-time score`} inputMode="numeric" value={match.homeScore ?? ""} placeholder="–" onChange={(event) => onScore(match.id, "homeScore", event.target.value)} /><b>:</b><input readOnly={isViewer} aria-label={`${away.name} full-time score`} inputMode="numeric" value={match.awayScore ?? ""} placeholder="–" onChange={(event) => onScore(match.id, "awayScore", event.target.value)} /></div><div className="player away"><span className="avatar alt">{away.name.slice(0, 2).toUpperCase()}</span><div><strong>{away.name}</strong><small>{away.team}</small></div></div></div>
+    {fullTimeDraw && <div className="knockoutResolution"><div className="resolutionIntro"><span>90&apos;</span><div><b>Level after full time</b><small>Enter extra-time goals to decide the tie.</small></div></div><div className="resolutionStage"><label>Extra time</label><div className="miniScore"><input readOnly={isViewer} aria-label={`${home.name} extra-time goals`} inputMode="numeric" value={match.homeExtraTime ?? ""} placeholder="–" onChange={(event) => onResolution(match.id, "homeExtraTime", event.target.value)} /><b>:</b><input readOnly={isViewer} aria-label={`${away.name} extra-time goals`} inputMode="numeric" value={match.awayExtraTime ?? ""} placeholder="–" onChange={(event) => onResolution(match.id, "awayExtraTime", event.target.value)} /></div></div>{extraTimeDraw && <div className="resolutionStage penalties"><label>Penalties</label><div className="miniScore"><input readOnly={isViewer} aria-label={`${home.name} penalties`} inputMode="numeric" value={match.homePenalties ?? ""} placeholder="–" onChange={(event) => onResolution(match.id, "homePenalties", event.target.value)} /><b>:</b><input readOnly={isViewer} aria-label={`${away.name} penalties`} inputMode="numeric" value={match.awayPenalties ?? ""} placeholder="–" onChange={(event) => onResolution(match.id, "awayPenalties", event.target.value)} /></div></div>}{penaltiesReady && match.homePenalties === match.awayPenalties && <p className="resolutionError">Penalties must produce a winner.</p>}</div>}
+  </article>;
+}
+
+function KnockoutResults({ tournament }: { tournament: Tournament }) {
+  const generatedMaxRound = Math.max(1, ...tournament.matches.map((match) => match.round));
+  const totalRounds = Math.max(1, Math.log2(tournament.players.length));
+  const player = (id: string) => tournament.players.find((candidate) => candidate.id === id);
+  return <><div className="sectionHead"><div><p className="eyebrow">Cup results</p><h2>Knockout rounds</h2></div><p className="tieNote">Every tie is decided at full time, after extra time, or on penalties</p></div><div className="knockoutResults">{Array.from({ length: generatedMaxRound }, (_, index) => index + 1).map((roundNumber) => { const isFinal = roundNumber === totalRounds; return <section className="resultRound" key={roundNumber}><div className="resultRoundHead"><span>{knockoutRoundLabel(roundNumber, totalRounds)}</span><small>{tournament.matches.filter((match) => match.round === roundNumber && confirmedKnockoutWinner(match)).length}/{tournament.matches.filter((match) => match.round === roundNumber).length} decided</small></div>{tournament.matches.filter((match) => match.round === roundNumber).map((match) => { const home = player(match.homeId), away = player(match.awayId), winner = confirmedKnockoutWinner(match), decision = knockoutDecision(match); const winnerClass = (playerId: string) => winner === playerId ? isFinal ? "winner champion" : "winner" : ""; return <article className={winner ? "decided" : ""} key={match.id}><div><span className={winnerClass(match.homeId)}><b>{home?.name}</b><small>{home?.team}</small></span><strong>{match.homeScore ?? "–"}</strong></div><div><span className={winnerClass(match.awayId)}><b>{away?.name}</b><small>{away?.team}</small></span><strong>{match.awayScore ?? "–"}</strong></div><footer><span>{winner ? isFinal ? `${player(winner)?.name} is champion` : `${player(winner)?.name} advances` : match.status === "live" ? "Result awaiting confirmation" : "Awaiting a winner"}</span><b>{winner ? `${isFinal ? "CHAMPION · " : ""}${knockoutScoreline(match)}` : decision ? `${decision} · Confirm full time` : "Pending"}</b></footer></article>; })}</section>; })}</div></>;
+}
+
+function TournamentPitch({ tournament }: { tournament: Tournament }) {
+  const generatedMaxRound = Math.max(1, ...tournament.matches.map((match) => match.round));
+  const maxRound = tournament.format === "knockout" ? Math.max(1, Math.log2(tournament.players.length)) : generatedMaxRound;
+  const player = (id: string) => tournament.players.find((candidate) => candidate.id === id);
+  const finalMatch = tournament.format === "knockout" ? tournament.matches.find((match) => match.round === maxRound && tournament.matches.filter((candidate) => candidate.round === maxRound).length === 1) : undefined;
+  const championId = finalMatch ? confirmedKnockoutWinner(finalMatch) : null;
+  return <><div className="sectionHead"><div><p className="eyebrow">Tournament map</p><h2>{tournament.format === "league" ? "League journey" : "Road to the cup"}</h2></div><p className="tieNote">Live bracket · updates as results are entered</p></div><div className={`pitchBoard ${tournament.format}`}><div className="pitchDepth" aria-hidden="true"><i /><i /><i /></div><div className="centreCircle" /><div className="pitchFlow">{Array.from({ length: maxRound }, (_, index) => index + 1).map((roundNumber) => { const isFinal = tournament.format === "knockout" && roundNumber === maxRound; return <div className={`pitchRound${isFinal ? " finalRound" : ""}`} key={roundNumber}><h3>{tournament.format === "knockout" ? knockoutRoundLabel(roundNumber, maxRound).toUpperCase() : `ROUND ${roundNumber}`}</h3>{tournament.matches.filter((match) => match.round === roundNumber).map((match) => { const home = player(match.homeId), away = player(match.awayId), winner = tournament.format === "knockout" ? confirmedKnockoutWinner(match) : null; const extraTimeReady = match.homeExtraTime !== null && match.homeExtraTime !== undefined && match.awayExtraTime !== null && match.awayExtraTime !== undefined; const homeScore = match.homeScore === null ? "–" : match.homeScore + (extraTimeReady ? match.homeExtraTime! : 0); const awayScore = match.awayScore === null ? "–" : match.awayScore + (extraTimeReady ? match.awayExtraTime! : 0); const winnerClass = (playerId: string) => winner === playerId ? isFinal ? "winner champion" : "winner" : ""; return <div className={`pitchMatch${winner ? " decided" : ""}`} key={match.id}><span className={winnerClass(match.homeId)}><b>{home?.name}</b><i>{homeScore}</i></span><span className={winnerClass(match.awayId)}><b>{away?.name}</b><i>{awayScore}</i></span>{tournament.format === "knockout" && <small>{isFinal && winner ? "CHAMPION" : winner ? knockoutDecision(match) : match.status === "live" ? "LIVE · UNCONFIRMED" : "UP NEXT"}</small>}</div>; })}</div>; })}{tournament.format === "knockout" && <div className={`cupNode${championId ? " crowned" : ""}`}><span>🏆</span><small>{championId ? "CHAMPION" : "THE CUP"}</small><strong>{championId ? player(championId)?.name : "Awaits a winner"}</strong></div>}</div></div></>;
+}
+
+function ChampionCelebration({ champion, onClose }: { champion: Player; onClose: () => void }) {
+  return <div className="modalBack championCelebrationBack"><section className="championCelebration" role="dialog" aria-modal="true" aria-labelledby="champion-title"><button className="championClose" aria-label="Close champion celebration" onClick={onClose}>×</button><div className="confetti" aria-hidden="true">{Array.from({ length: 18 }, (_, index) => <i key={index} />)}</div><p>Lagata Ultimate Team</p><div className="celebrationCup" aria-hidden="true">🏆</div><span>Knockout champion</span><h2 id="champion-title">{champion.name}</h2><strong>{champion.team}</strong><small>One tournament. One winner. The cup is yours.</small><button className="celebrationDone" onClick={onClose}>Lift the cup</button></section></div>;
+}
 
 export default function Home() {
   const [data, setData] = useState<Tournament>(initial);
   const [draft, setDraft] = useState<Pick<Tournament, "name" | "players" | "format" | "homeAndAway">>({ name: initial.name, players: initial.players, format: initial.format, homeAndAway: initial.homeAndAway });
   const [ready, setReady] = useState(false); const [tab, setTab] = useState<"matches" | "table" | "stats" | "pitch">("matches");
   const [round, setRound] = useState(1); const [showSetup, setShowSetup] = useState(false); const [settingsTab, setSettingsTab] = useState<"setup" | "access" | "data" | "history">("setup"); const [showDashboard, setShowDashboard] = useState(false); const [showMobileMenu, setShowMobileMenu] = useState(false); const [compactMode, setCompactMode] = useState(false); const [toast, setToast] = useState<{ message: string; tone?: "success" | "error" } | null>(null); const [catalog, setCatalog] = useState<TournamentRef[]>([]); const importRef = useRef<HTMLInputElement>(null); const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showChampionCelebration, setShowChampionCelebration] = useState(false); const previousFinalState = useRef<string | null>(null); const celebratedFinalResult = useRef(""); const celebrationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light"); const [shareId, setShareId] = useState(""); const [editToken, setEditToken] = useState("");
   const [shareState, setShareState] = useState<"idle" | "saving" | "copied" | "error">("idle"); const [adminCopyState, setAdminCopyState] = useState<"idle" | "copied" | "error">("idle"); const cloudLoaded = useRef(false); const creatingCloud = useRef(false);
 
@@ -120,18 +226,56 @@ export default function Home() {
   const sharingAvailable = true;
   const isViewer = Boolean(shareId && !editToken); const playerById = (id: string) => data.players.find((p) => p.id === id);
   const maxRound = Math.max(1, ...data.matches.map((m) => m.round)); const playedMatches = data.matches.filter((m) => m.homeScore !== null && m.awayScore !== null); const completed = playedMatches.filter((m) => m.status === "finished").length;
+  const totalRounds = data.format === "knockout" ? Math.max(1, Math.log2(data.players.length)) : maxRound;
   const progress = data.matches.length ? Math.round((completed / data.matches.length) * 100) : 0;
   const tournamentComplete = data.matches.length > 0 && completed === data.matches.length;
   const table = useMemo(() => {
-    const rows = data.players.map((p) => ({ ...p, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 })); const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
-    data.matches.forEach((m) => { if (m.homeScore === null || m.awayScore === null) return; const h = byId[m.homeId], a = byId[m.awayId]; if (!h || !a) return; h.p++; a.p++; h.gf += m.homeScore; h.ga += m.awayScore; a.gf += m.awayScore; a.ga += m.homeScore; if (m.homeScore > m.awayScore) { h.w++; a.l++; h.pts += 3; } else if (m.homeScore < m.awayScore) { a.w++; h.l++; a.pts += 3; } else { h.d++; a.d++; h.pts++; a.pts++; } });
-    rows.forEach((r) => r.gd = r.gf - r.ga); return rows.sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || a.name.localeCompare(b.name));
+    const rows = data.players.map((player) => ({ ...player, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 }));
+    const byId = Object.fromEntries(rows.map((row) => [row.id, row]));
+    data.matches.forEach((match) => {
+      if (match.homeScore === null || match.awayScore === null) return;
+      const home = byId[match.homeId], away = byId[match.awayId];
+      if (!home || !away) return;
+      const extraTimeReady = match.homeExtraTime !== null && match.homeExtraTime !== undefined && match.awayExtraTime !== null && match.awayExtraTime !== undefined;
+      const homeGoals = match.homeScore + (data.format === "knockout" && extraTimeReady ? match.homeExtraTime! : 0);
+      const awayGoals = match.awayScore + (data.format === "knockout" && extraTimeReady ? match.awayExtraTime! : 0);
+      if (data.format === "knockout") {
+        const winner = confirmedKnockoutWinner(match);
+        if (!winner) return;
+        home.p++; away.p++; home.gf += homeGoals; home.ga += awayGoals; away.gf += awayGoals; away.ga += homeGoals;
+        if (winner === home.id) { home.w++; away.l++; home.pts += 3; } else { away.w++; home.l++; away.pts += 3; }
+        return;
+      }
+      home.p++; away.p++; home.gf += homeGoals; home.ga += awayGoals; away.gf += awayGoals; away.ga += homeGoals;
+      if (homeGoals > awayGoals) { home.w++; away.l++; home.pts += 3; } else if (homeGoals < awayGoals) { away.w++; home.l++; away.pts += 3; } else { home.d++; away.d++; home.pts++; away.pts++; }
+    });
+    rows.forEach((row) => row.gd = row.gf - row.ga);
+    return rows.sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || a.name.localeCompare(b.name));
   }, [data]);
   const rankedPlayers = table.filter((row) => row.p > 0); const topScorer = [...rankedPlayers].sort((a, b) => b.gf - a.gf || b.pts - a.pts)[0]; const bestDefence = [...rankedPlayers].sort((a, b) => a.ga - b.ga || b.p - a.p)[0];
   const biggestWin = [...playedMatches].sort((a, b) => Math.abs((b.homeScore || 0) - (b.awayScore || 0)) - Math.abs((a.homeScore || 0) - (a.awayScore || 0)))[0];
   const highestScoring = [...playedMatches].sort((a, b) => ((b.homeScore || 0) + (b.awayScore || 0)) - ((a.homeScore || 0) + (a.awayScore || 0)))[0];
-  const finalMatch = data.format === "knockout" ? data.matches.find((m) => m.round === maxRound && data.matches.filter((x) => x.round === maxRound).length === 1) : undefined;
-  const champion = finalMatch && finalMatch.homeScore !== null && finalMatch.awayScore !== null ? playerById(finalMatch.homeScore > finalMatch.awayScore ? finalMatch.homeId : finalMatch.awayId) : undefined;
+  const finalMatch = data.format === "knockout" ? data.matches.find((match) => match.round === totalRounds && data.matches.filter((candidate) => candidate.round === totalRounds).length === 1) : undefined;
+  const championId = finalMatch ? confirmedKnockoutWinner(finalMatch) : null;
+  const champion = championId ? playerById(championId) : undefined;
+  function queueChampionCelebration(match: Match, winnerId: string) {
+    const celebrationKey = `${match.id}:${winnerId}`;
+    if (celebratedFinalResult.current === celebrationKey) return;
+    celebratedFinalResult.current = celebrationKey;
+    if (celebrationTimer.current) clearTimeout(celebrationTimer.current);
+    celebrationTimer.current = setTimeout(() => setShowChampionCelebration(true), 500);
+  }
+  useEffect(() => {
+    if (!ready) return;
+    const currentState = finalMatch ? `${finalMatch.id}:${finalMatch.status}:${championId || ""}` : "none";
+    if (previousFinalState.current === null) { previousFinalState.current = currentState; if (championId && finalMatch?.status === "finished") celebratedFinalResult.current = `${finalMatch.id}:${championId}`; return; }
+    const previousState = previousFinalState.current;
+    previousFinalState.current = currentState;
+    if (!finalMatch || finalMatch.status !== "finished") celebratedFinalResult.current = "";
+    if (data.format !== "knockout" || !championId || !finalMatch || finalMatch.status !== "finished" || previousState === currentState) return;
+    queueChampionCelebration(finalMatch, championId);
+    return () => { if (celebrationTimer.current) clearTimeout(celebrationTimer.current); };
+  }, [ready, data.format, championId, finalMatch]);
   const leagueOutcome = useMemo(() => {
     if (data.format !== "league" || !data.matches.length || !table.length) return null;
     const leader = table[0];
@@ -152,15 +296,53 @@ export default function Home() {
       ? { status: "clinched" as const, winner: leader, contenderCount: 1, remainingFixtures }
       : { status: "open" as const, winner: undefined, contenderCount: challengers.length + 1, remainingFixtures };
   }, [data.format, data.matches, table]);
+  const knockoutBestDefence = (() => {
+    if (data.format !== "knockout" || !tournamentComplete) return null;
+    const rows = data.players.map((player) => ({ player, played: 0, conceded: 0, cleanSheets: 0, furthestRound: 0 }));
+    const byId = Object.fromEntries(rows.map((row) => [row.player.id, row]));
+    data.matches.forEach((match) => {
+      if (match.status !== "finished" || !knockoutWinner(match) || match.homeScore === null || match.awayScore === null) return;
+      const home = byId[match.homeId], away = byId[match.awayId];
+      if (!home || !away) return;
+      const extraTimeReady = match.homeExtraTime !== null && match.homeExtraTime !== undefined && match.awayExtraTime !== null && match.awayExtraTime !== undefined;
+      const homeGoals = match.homeScore + (extraTimeReady ? match.homeExtraTime! : 0);
+      const awayGoals = match.awayScore + (extraTimeReady ? match.awayExtraTime! : 0);
+      home.played++; away.played++;
+      home.conceded += awayGoals; away.conceded += homeGoals;
+      if (awayGoals === 0) home.cleanSheets++;
+      if (homeGoals === 0) away.cleanSheets++;
+      home.furthestRound = Math.max(home.furthestRound, match.round);
+      away.furthestRound = Math.max(away.furthestRound, match.round);
+    });
+    const minimumMatches = data.players.length === 2 ? 1 : 2;
+    const eligible = rows.filter((row) => row.played >= minimumMatches).sort((left, right) =>
+      (left.conceded / left.played) - (right.conceded / right.played)
+      || right.cleanSheets - left.cleanSheets
+      || right.furthestRound - left.furthestRound
+      || left.conceded - right.conceded
+    );
+    if (!eligible.length) return null;
+    const best = eligible[0], bestRate = best.conceded / best.played;
+    const winners = eligible.filter((row) =>
+      Math.abs((row.conceded / row.played) - bestRate) < 0.0001
+      && row.cleanSheets === best.cleanSheets
+      && row.furthestRound === best.furthestRound
+      && row.conceded === best.conceded
+    );
+    return { winners, rate: bestRate, cleanSheets: best.cleanSheets };
+  })();
   const awardChampion = data.format === "league" ? leagueOutcome?.winner : champion;
   const championAwardLabel = data.format === "league" && leagueOutcome?.status === "clinched" ? "Title clinched" : "Champion";
   const championAwardTitle = data.format === "league" && leagueOutcome?.status === "tied" ? "Title playoff required" : awardChampion?.name || "Still to be decided";
   const championAwardDetail = data.format !== "league" ? awardChampion?.team || "Complete the tournament to crown a winner" : leagueOutcome?.status === "clinched" ? `${awardChampion?.team} · Uncatchable with ${leagueOutcome.remainingFixtures} fixture${leagueOutcome.remainingFixtures === 1 ? "" : "s"} remaining` : leagueOutcome?.status === "complete" ? awardChampion?.team || "League complete" : leagueOutcome?.status === "tied" ? `${leagueOutcome.contenderCount} players are level on points, goal difference and goals scored` : `${leagueOutcome?.contenderCount || data.players.length} player${(leagueOutcome?.contenderCount || data.players.length) === 1 ? "" : "s"} remain in contention`;
+  const bestDefenceTitle = data.format === "league" ? bestDefence?.name || "No results yet" : !tournamentComplete ? "Awarded after the final" : knockoutBestDefence?.winners.map((row) => row.player.name).join(" & ") || "No eligible player";
+  const bestDefenceDetail = data.format === "league" ? bestDefence ? `${bestDefence.ga} goals conceded` : "Enter scores to begin" : !tournamentComplete ? "Knockout records are compared when every match is complete" : knockoutBestDefence ? `${knockoutBestDefence.rate.toFixed(2)} conceded per match · ${knockoutBestDefence.cleanSheets} clean sheet${knockoutBestDefence.cleanSheets === 1 ? "" : "s"}${knockoutBestDefence.winners.length > 1 ? " · Shared award" : ""}` : "No player met the minimum match requirement";
 
   function notify(message: string, tone: "success" | "error" = "success") { if (toastTimer.current) clearTimeout(toastTimer.current); setToast({ message, tone }); toastTimer.current = setTimeout(() => setToast(null), 2400); }
   function rememberTournament(id: string, name: string) { setCatalog((current) => { const next = [{ id, name, updatedAt: new Date().toISOString(), archived: current.find((item) => item.id === id)?.archived }, ...current.filter((item) => item.id !== id)]; localStorage.setItem("lagata-tournament-catalog", JSON.stringify(next)); return next; }); }
-  function updateScore(id: string, side: "homeScore" | "awayScore", value: string) { if (isViewer) return; const score = value === "" ? null : Math.max(0, Math.min(99, Number(value))); setData((d) => { const changed = d.matches.map((m) => { if (m.id !== id) return m; const updated = { ...m, [side]: score }; return { ...updated, status: updated.homeScore !== null && updated.awayScore !== null ? "finished" as MatchStatus : score !== null ? "live" as MatchStatus : m.status }; }); const next = { ...d, matches: d.format === "knockout" ? advanceKnockout(changed) : changed }; return audited(d, next, "Score updated"); }); }
-  function updateStatus(id: string, status: MatchStatus) { if (isViewer) return; setData((d) => audited(d, { ...d, matches: d.matches.map((m) => m.id === id ? { ...m, status } : m) }, `Match marked ${statusLabels[status].toLowerCase()}`)); }
+  function updateScore(id: string, side: "homeScore" | "awayScore", value: string) { if (isViewer) return; const score = value === "" ? null : Math.max(0, Math.min(99, Number(value))); setData((d) => { const changed = d.matches.map((match) => { if (match.id !== id) return match; const updated: Match = { ...match, [side]: score, homeExtraTime: null, awayExtraTime: null, homePenalties: null, awayPenalties: null }; const hasAnyScore = updated.homeScore !== null || updated.awayScore !== null; const hasBothScores = updated.homeScore !== null && updated.awayScore !== null; const status: MatchStatus = d.format === "knockout" ? hasAnyScore ? "live" : "scheduled" : hasBothScores ? "finished" : hasAnyScore ? "live" : "scheduled"; return { ...updated, status }; }); const next = { ...d, matches: d.format === "knockout" ? advanceKnockout(changed) : changed }; return audited(d, next, "Score updated"); }); }
+  function updateKnockoutResolution(id: string, field: "homeExtraTime" | "awayExtraTime" | "homePenalties" | "awayPenalties", value: string) { if (isViewer) return; const score = value === "" ? null : Math.max(0, Math.min(99, Number(value))); setData((d) => { const changed = d.matches.map((match) => { if (match.id !== id) return match; const clearsPenalties = field === "homeExtraTime" || field === "awayExtraTime"; return { ...match, [field]: score, ...(clearsPenalties ? { homePenalties: null, awayPenalties: null } : {}), status: "live" as MatchStatus }; }); return audited(d, { ...d, matches: advanceKnockout(changed) }, field.includes("Penalties") ? "Penalty result updated" : "Extra-time result updated"); }); }
+  function updateStatus(id: string, status: MatchStatus) { if (isViewer) return; const match = data.matches.find((candidate) => candidate.id === id); if (data.format === "knockout" && status === "finished" && match && (match.homeScore === null || match.awayScore === null)) { notify("Enter both scores before marking the match as finished", "error"); return; } const winnerId = data.format === "knockout" && match ? knockoutWinner(match) : null; if (data.format === "knockout" && status === "finished" && match && !winnerId) { notify("A knockout match needs a clear winner before it can finish", "error"); return; } if (data.format === "knockout" && match?.round === totalRounds && status !== "finished") { celebratedFinalResult.current = ""; setShowChampionCelebration(false); } setData((d) => { const changed = d.matches.map((candidate) => candidate.id === id ? { ...candidate, status } : candidate); const next = { ...d, matches: d.format === "knockout" ? advanceKnockout(changed) : changed }; return audited(d, next, `Match marked ${statusLabels[status].toLowerCase()}`); }); if (data.format === "knockout" && status === "finished" && match && winnerId && match.round === totalRounds && data.matches.filter((candidate) => candidate.round === totalRounds).length === 1) queueChampionCelebration(match, winnerId); }
   function undoLast() { if (isViewer) return; setData((d) => { const last = d.history[0]; if (!last) return d; try { notify("Latest change undone"); return { ...normaliseTournament(JSON.parse(last.snapshot)), history: d.history.slice(1) }; } catch { notify("Unable to undo that change", "error"); return d; } }); }
   function openSetup(tab: "setup" | "access" | "data" | "history" = "setup") { if (isViewer) return; setDraft({ name: data.name, players: data.players.map((p) => ({ ...p })), format: data.format, homeAndAway: data.homeAndAway }); setSettingsTab(tab); setShowMobileMenu(false); setShowSetup(true); }
   function regenerate() { const next: Tournament = { name: draft.name.trim() || "Friday Night League", format: draft.format, homeAndAway: draft.format === "league" && draft.homeAndAway, players: draft.players, matches: makeFixtures(draft.players, draft.format, draft.homeAndAway), history: data.history }; setData(audited(data, next, "Fixtures regenerated")); setRound(1); setShowSetup(false); setTab("matches"); }
@@ -175,7 +357,7 @@ export default function Home() {
     try { await navigator.clipboard.writeText(`${location.origin}${location.pathname}?t=${shareId}#admin=${editToken}`); setAdminCopyState("copied"); notify("Private admin link copied"); setTimeout(() => setAdminCopyState("idle"), 1800); } catch { setAdminCopyState("error"); notify("Could not copy the admin link", "error"); }
   }
   function downloadFile(name: string, body: string, type: string) { const url = URL.createObjectURL(new Blob([body], { type })); const anchor = document.createElement("a"); anchor.href = url; anchor.download = name; anchor.click(); URL.revokeObjectURL(url); }
-  function exportCsv() { const rows = [["Round", "Status", "Home", "Home score", "Away score", "Away"], ...data.matches.map((m) => [String(m.round), statusLabels[m.status], playerById(m.homeId)?.name || "", m.homeScore ?? "", m.awayScore ?? "", playerById(m.awayId)?.name || ""])]; downloadFile(`${data.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-results.csv`, rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n"), "text/csv"); notify("CSV export downloaded"); }
+  function exportCsv() { const rows = [["Round", "Status", "Home", "FT", "Away", "FT", "ET home", "ET away", "Pens home", "Pens away", "Decision"], ...data.matches.map((match) => [String(match.round), statusLabels[match.status], playerById(match.homeId)?.name || "", match.homeScore ?? "", playerById(match.awayId)?.name || "", match.awayScore ?? "", match.homeExtraTime ?? "", match.awayExtraTime ?? "", match.homePenalties ?? "", match.awayPenalties ?? "", data.format === "knockout" ? knockoutDecision(match) || "" : ""])]; downloadFile(`${data.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-results.csv`, rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n"), "text/csv"); notify("CSV export downloaded"); }
   function exportBackup() { downloadFile(`${data.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-backup.json`, JSON.stringify(data, null, 2), "application/json"); notify("Tournament backup downloaded"); }
   function restoreBackup(file?: File) { if (!file) return; const reader = new FileReader(); reader.onload = () => { try { const restored = normaliseTournament(JSON.parse(String(reader.result))); if (restored.players.length < 2 || !restored.matches.length) throw new Error(); setData((d) => audited(d, restored, "Backup restored")); setShowSetup(false); notify("Backup restored successfully"); } catch { notify("That file is not a valid Lagata backup", "error"); } }; reader.readAsText(file); }
   function toggleCompactMode() { setCompactMode((current) => { const next = !current; localStorage.setItem("lagata-scorekeeper-mode", String(next)); notify(next ? "Scorekeeper mode enabled" : "Standard match view restored"); return next; }); }
@@ -189,13 +371,14 @@ export default function Home() {
     {isViewer && <div className="viewerBar"><span className="liveDot" tabIndex={0} role="status" aria-label="Live updates active" data-label="Live updates active" /> Live spectator view <b>Scores refresh automatically</b></div>}
     <section className="hero"><div><p className="eyebrow"><span className={`liveDot${tournamentComplete ? " complete" : ""}`} tabIndex={0} role="status" aria-label={tournamentComplete ? "Tournament complete" : "Tournament updates are live"} data-label={tournamentComplete ? "Tournament complete" : "Tournament updates are live"} /> {tournamentComplete ? "Tournament complete" : "Tournament in progress"}</p><h1>{data.name}</h1><p className="subline">{data.players.length} players <span>•</span> {data.format === "league" ? "League phase" : "Knockout cup"} <span>•</span> {data.format === "league" ? `${data.homeAndAway ? "Home & away" : "Single round"} · 3 pts per win` : "One champion"}</p></div>{champion ? <div className="championCard"><span>CHAMPION</span><strong>🏆 {champion.name}</strong><small>{champion.team}</small></div> : <div className="progressCard"><div className="progressTop"><span>Tournament progress</span><strong>{progress}%</strong></div><div className="progressTrack"><i style={{ width: `${progress}%` }} /></div><small>{completed} of {data.matches.length} matches played</small></div>}</section>
     <section className="content"><div className="tabs" role="tablist"><button className={tab === "matches" ? "active" : ""} onClick={() => setTab("matches")}>Matches <b>{data.matches.length - completed}</b></button><button className={tab === "table" ? "active" : ""} onClick={() => setTab("table")}>{data.format === "league" ? "League table" : "Results"}</button><button className={tab === "stats" ? "active" : ""} onClick={() => setTab("stats")}>Stats</button><button className={tab === "pitch" ? "active" : ""} onClick={() => setTab("pitch")}>Pitch</button></div>
-      {tab === "matches" && <><div className="sectionHead"><div><p className="eyebrow">Fixtures</p><h2>{data.format === "knockout" && round === maxRound ? "Final" : `Round ${round}`} <span>of {maxRound}</span></h2></div><div className="roundNav"><button aria-label="Previous round" disabled={round === 1} onClick={() => setRound((r) => r - 1)}>←</button><button aria-label="Next round" disabled={round === maxRound} onClick={() => setRound((r) => r + 1)}>→</button></div></div>{!isViewer && <button className={`scorekeeperToggle${compactMode ? " active" : ""}`} onClick={toggleCompactMode}>{compactMode ? "✓ Compact scorekeeper" : "⚡ Scorekeeper mode"}</button>}<div className={`matchList${compactMode ? " compact" : ""}`}>{data.matches.filter((m) => m.round === round).map((m) => { const h = playerById(m.homeId), a = playerById(m.awayId); if (!h || !a) return null; return <article className="matchCard" key={m.id}><div className="matchMeta">{isViewer ? <span className={`statusBadge ${m.status}`}>{statusLabels[m.status]}</span> : <select className={`statusSelect ${m.status}`} aria-label={`Status for ${h.name} versus ${a.name}`} value={m.status} onChange={(e) => updateStatus(m.id, e.target.value as MatchStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>}<i /><small>Match {data.matches.indexOf(m) + 1}</small></div><div className="matchup"><div className="player home"><div><strong>{h.name}</strong><small>{h.team}</small></div><span className="avatar">{h.name.slice(0, 2).toUpperCase()}</span></div><div className="scoreBox"><input readOnly={isViewer} aria-label={`${h.name} score`} inputMode="numeric" value={m.homeScore ?? ""} placeholder="–" onChange={(e) => updateScore(m.id, "homeScore", e.target.value)} /><b>:</b><input readOnly={isViewer} aria-label={`${a.name} score`} inputMode="numeric" value={m.awayScore ?? ""} placeholder="–" onChange={(e) => updateScore(m.id, "awayScore", e.target.value)} /></div><div className="player away"><span className="avatar alt">{a.name.slice(0, 2).toUpperCase()}</span><div><strong>{a.name}</strong><small>{a.team}</small></div></div></div></article>; })}</div><p className="saveNote">{isViewer ? "Live scores refresh every 5 seconds" : shareId ? (shareState === "error" ? "Cloud save needs retrying" : "✓ Changes sync to every spectator") : "✓ Scores save automatically on this device"}</p></>}
-      {tab === "table" && <><div className="sectionHead"><div><p className="eyebrow">Standings</p><h2>{data.format === "league" ? "League table" : "Tournament results"}</h2></div><p className="tieNote">{data.format === "league" ? "Points, goal difference, then goals scored" : "Completed knockout matches"}</p></div><div className="tableWrap"><table><thead><tr><th>#</th><th>Player</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr></thead><tbody>{table.map((r, i) => <tr key={r.id}><td><span className={`rank rank${i + 1}`}>{i + 1}</span></td><td><strong>{r.name}</strong><small>{r.team}</small></td><td>{r.p}</td><td>{r.w}</td><td>{r.d}</td><td>{r.l}</td><td>{r.gf}</td><td>{r.ga}</td><td>{r.gd > 0 ? "+" : ""}{r.gd}</td><td><b>{r.pts}</b></td></tr>)}</tbody></table></div></>}
-      {tab === "stats" && <><div className="sectionHead"><div><p className="eyebrow">Tournament intelligence</p><h2>Stats & awards</h2></div><p className="tieNote">Updates after every completed score</p></div><div className="awardGrid"><article className={`awardCard featured${data.format === "league" && leagueOutcome?.status === "clinched" ? " clinched" : data.format === "league" && leagueOutcome?.status === "tied" ? " tied" : ""}`}><span>🏆 {championAwardLabel}</span><strong>{championAwardTitle}</strong><small>{championAwardDetail}</small></article><article className="awardCard"><span>⚽ Golden boot</span><strong>{topScorer?.name || "No results yet"}</strong><small>{topScorer ? `${topScorer.gf} goals scored` : "Enter scores to begin"}</small></article><article className="awardCard"><span>🛡 Best defence</span><strong>{bestDefence?.name || "No results yet"}</strong><small>{bestDefence ? `${bestDefence.ga} goals conceded` : "Enter scores to begin"}</small></article><article className="awardCard"><span>📈 Biggest win</span><strong>{biggestWin ? `${playerById(biggestWin.homeId)?.name} ${biggestWin.homeScore}–${biggestWin.awayScore} ${playerById(biggestWin.awayId)?.name}` : "No results yet"}</strong><small>{biggestWin ? `Round ${biggestWin.round}` : "Enter scores to begin"}</small></article></div><div className="statStrip"><div><span>Matches played</span><strong>{playedMatches.length}</strong></div><div><span>Total goals</span><strong>{playedMatches.reduce((sum, m) => sum + (m.homeScore || 0) + (m.awayScore || 0), 0)}</strong></div><div><span>Goals per match</span><strong>{playedMatches.length ? (playedMatches.reduce((sum, m) => sum + (m.homeScore || 0) + (m.awayScore || 0), 0) / playedMatches.length).toFixed(1) : "0.0"}</strong></div><div><span>Highest scoring</span><strong>{highestScoring ? `${(highestScoring.homeScore || 0) + (highestScoring.awayScore || 0)} goals` : "—"}</strong></div></div><div className="playerStats"><h3>Player performance</h3>{table.map((row) => <div className="playerStatRow" key={row.id}><span className="avatar">{row.name.slice(0,2).toUpperCase()}</span><div><strong>{row.name}</strong><small>{row.team}</small></div><b>{row.w}W</b><b>{row.gf} GF</b><b>{row.gd > 0 ? "+" : ""}{row.gd} GD</b></div>)}</div></>}
-      {tab === "pitch" && <><div className="sectionHead"><div><p className="eyebrow">Tournament map</p><h2>{data.format === "league" ? "League journey" : "Road to the cup"}</h2></div><p className="tieNote">Updates as scores are entered</p></div><div className={`pitchBoard ${data.format}`}><div className="centreCircle" /><div className="pitchFlow">{Array.from({ length: maxRound }, (_, i) => i + 1).map((r) => <div className="pitchRound" key={r}><h3>{data.format === "knockout" && r === maxRound ? "FINAL" : `ROUND ${r}`}</h3>{data.matches.filter((m) => m.round === r).map((m) => { const h = playerById(m.homeId), a = playerById(m.awayId); if (!h || !a) return null; return <div className="pitchMatch" key={m.id}><span><b>{h.name}</b><i>{m.homeScore ?? "–"}</i></span><span><b>{a.name}</b><i>{m.awayScore ?? "–"}</i></span></div>; })}</div>)}{data.format === "knockout" && <div className="cupNode"><span>🏆</span><strong>{champion?.name || "CHAMPION"}</strong></div>}</div></div></>}
+      {tab === "matches" && <><div className="sectionHead"><div><p className="eyebrow">Fixtures</p><h2>{data.format === "knockout" ? knockoutRoundLabel(round, totalRounds) : `Round ${round}`} <span>of {totalRounds}</span></h2></div><div className="roundNav"><button aria-label="Previous round" disabled={round === 1} onClick={() => setRound((value) => value - 1)}>←</button><button aria-label="Next round" disabled={round === maxRound} onClick={() => setRound((value) => value + 1)}>→</button></div></div>{!isViewer && <button className={`scorekeeperToggle${compactMode ? " active" : ""}`} onClick={toggleCompactMode}>{compactMode ? "✓ Compact scorekeeper" : "⚡ Scorekeeper mode"}</button>}<div className={`matchList${compactMode ? " compact" : ""}`}>{data.matches.filter((match) => match.round === round).map((match) => <MatchCard key={match.id} match={match} matchNumber={data.matches.indexOf(match) + 1} format={data.format} players={data.players} isViewer={isViewer} onScore={updateScore} onResolution={updateKnockoutResolution} onStatus={updateStatus} />)}</div><p className="saveNote">{isViewer ? "Live scores refresh every 5 seconds" : shareId ? (shareState === "error" ? "Cloud save needs retrying" : "✓ Changes sync to every spectator") : "✓ Scores save automatically on this device"}</p></>}
+      {tab === "table" && (data.format === "knockout" ? <KnockoutResults tournament={data} /> : <><div className="sectionHead"><div><p className="eyebrow">Standings</p><h2>League table</h2></div><p className="tieNote">Points, goal difference, then goals scored</p></div><div className="tableWrap"><table><thead><tr><th>#</th><th>Player</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr></thead><tbody>{table.map((row, index) => <tr key={row.id}><td><span className={`rank rank${index + 1}`}>{index + 1}</span></td><td><strong>{row.name}</strong><small>{row.team}</small></td><td>{row.p}</td><td>{row.w}</td><td>{row.d}</td><td>{row.l}</td><td>{row.gf}</td><td>{row.ga}</td><td>{row.gd > 0 ? "+" : ""}{row.gd}</td><td><b>{row.pts}</b></td></tr>)}</tbody></table></div></>)}
+      {tab === "stats" && <><div className="sectionHead"><div><p className="eyebrow">Tournament intelligence</p><h2>Stats & awards</h2></div><p className="tieNote">Updates after every completed score</p></div><div className="awardGrid"><article className={`awardCard featured${data.format === "league" && leagueOutcome?.status === "clinched" ? " clinched" : data.format === "league" && leagueOutcome?.status === "tied" ? " tied" : ""}`}><span>🏆 {championAwardLabel}</span><strong>{championAwardTitle}</strong><small>{championAwardDetail}</small></article><article className="awardCard"><span>⚽ Golden boot</span><strong>{topScorer?.name || "No results yet"}</strong><small>{topScorer ? `${topScorer.gf} goals scored` : "Enter scores to begin"}</small></article><article className="awardCard"><span>🛡 Best defence</span><strong>{bestDefenceTitle}</strong><small>{bestDefenceDetail}</small></article><article className="awardCard"><span>📈 Biggest win</span><strong>{biggestWin ? `${playerById(biggestWin.homeId)?.name} ${biggestWin.homeScore}–${biggestWin.awayScore} ${playerById(biggestWin.awayId)?.name}` : "No results yet"}</strong><small>{biggestWin ? `Round ${biggestWin.round}` : "Enter scores to begin"}</small></article></div><div className="statStrip"><div><span>Matches played</span><strong>{playedMatches.length}</strong></div><div><span>Total goals</span><strong>{playedMatches.reduce((sum, m) => sum + (m.homeScore || 0) + (m.awayScore || 0), 0)}</strong></div><div><span>Goals per match</span><strong>{playedMatches.length ? (playedMatches.reduce((sum, m) => sum + (m.homeScore || 0) + (m.awayScore || 0), 0) / playedMatches.length).toFixed(1) : "0.0"}</strong></div><div><span>Highest scoring</span><strong>{highestScoring ? `${(highestScoring.homeScore || 0) + (highestScoring.awayScore || 0)} goals` : "—"}</strong></div></div><div className="playerStats"><h3>Player performance</h3>{table.map((row) => <div className="playerStatRow" key={row.id}><span className="avatar">{row.name.slice(0,2).toUpperCase()}</span><div><strong>{row.name}</strong><small>{row.team}</small></div><b>{row.w}W</b><b>{row.gf} GF</b><b>{row.gd > 0 ? "+" : ""}{row.gd} GD</b></div>)}</div></>}
+      {tab === "pitch" && <TournamentPitch tournament={data} />}
     </section>
     {showSetup && <div className="modalBack" onMouseDown={(e) => e.target === e.currentTarget && setShowSetup(false)}><section className="modal settingsModal" role="dialog" aria-modal="true" aria-labelledby="setup-title"><div className="sheetHandle" aria-hidden="true" /><div className="modalHead"><div><p className="eyebrow">Tournament management</p><h2 id="setup-title">{settingsTab === "setup" ? "Setup" : settingsTab === "access" ? "Access" : settingsTab === "data" ? "Data & exports" : "Change history"}</h2></div><button aria-label="Close" onClick={() => setShowSetup(false)}>×</button></div><nav className="settingsTabs" aria-label="Tournament settings sections">{(["setup","access","data","history"] as const).map((item) => <button className={settingsTab === item ? "active" : ""} onClick={() => setSettingsTab(item)} key={item}>{item === "data" ? "Data" : item[0].toUpperCase() + item.slice(1)}</button>)}</nav>{settingsTab === "setup" && <><label className="nameField">Tournament name<input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></label><fieldset className="formatPicker"><legend>Format</legend><button className={draft.format === "league" ? "selected" : ""} onClick={() => setDraft({ ...draft, format: "league" })}><b>League</b><small>Everyone plays everyone</small></button><button className={draft.format === "knockout" ? "selected" : ""} onClick={() => setDraft({ ...draft, format: "knockout" })}><b>Knockout</b><small>Lose and you’re out</small></button></fieldset>{draft.format === "league" && <label className="legOption"><span><b>Home & away fixtures</b><small>Each pair plays twice, swapping the home player</small></span><input type="checkbox" checked={draft.homeAndAway} onChange={(e) => setDraft({ ...draft, homeAndAway: e.target.checked })} /></label>}<div className="playerEditor">{draft.players.map((p, i) => <div className="playerRow" key={p.id}><span>{i + 1}</span><input aria-label={`Player ${i + 1} name`} value={p.name} onChange={(e) => updatePlayer(p.id, "name", e.target.value)} /><input aria-label={`${p.name} team`} value={p.team} onChange={(e) => updatePlayer(p.id, "team", e.target.value)} /><button aria-label={`Remove ${p.name}`} disabled={draft.players.length <= 2} onClick={() => setDraft((d) => ({ ...d, players: d.players.filter((x) => x.id !== p.id) }))}>×</button></div>)}</div><button className="addButton" onClick={addPlayer}>＋ Add player</button><div className="warning">{draft.format === "knockout" && ![2,4,8,16].includes(draft.players.length) ? "Knockout tournaments currently need 2, 4, 8 or 16 players." : "Generating fixtures will clear any existing scores."}</div><div className="modalActions"><button className="cancel" onClick={() => setShowSetup(false)}>Cancel</button><button className="primary" disabled={draft.players.some((p) => !p.name.trim()) || (draft.format === "knockout" && ![2,4,8,16].includes(draft.players.length))} onClick={regenerate}>Randomise & generate fixtures</button></div></>}{settingsTab === "access" && (shareId && editToken ? <div className="adminAccess"><span><b>Admin handover</b><small>Anyone with this private link can update fixtures and scores. Share it only with trusted scorekeepers.</small></span><button onClick={copyAdminLink}>{adminCopyState === "copied" ? "Admin link copied" : adminCopyState === "error" ? "Copy failed" : "Copy admin link"}</button></div> : <div className="settingsEmpty"><span>🔐</span><strong>Admin access is being prepared</strong><p>Once cloud saving is ready, the private handover link will appear here.</p></div>)}{settingsTab === "data" && <section className="dataTools"><div><b>Exports & backup</b><small>Download results, create a printable PDF, or restore a saved tournament.</small></div><div><button onClick={exportCsv}>CSV results</button><button onClick={() => window.print()}>Print / PDF</button><button onClick={exportBackup}>Download backup</button><button onClick={() => importRef.current?.click()}>Restore backup</button><input ref={importRef} hidden type="file" accept="application/json,.json" onChange={(e) => restoreBackup(e.target.files?.[0])} /></div></section>}{settingsTab === "history" && (data.history.length > 0 ? <section className="auditPanel"><div><b>Recent changes</b><button onClick={undoLast}>↶ Undo latest</button></div>{data.history.slice(0,10).map((entry) => <p key={entry.id}><span>{entry.label}</span><time>{new Date(entry.at).toLocaleString([], { month:"short", day:"numeric", hour: "2-digit", minute: "2-digit" })}</time></p>)}</section> : <div className="settingsEmpty"><span>↶</span><strong>No changes recorded yet</strong><p>Score edits, status updates and regenerated fixtures will appear here.</p></div>)}</section></div>}
     {showDashboard && <div className="modalBack dashboardBack" onMouseDown={(e) => e.target === e.currentTarget && setShowDashboard(false)}><section className="modal dashboardModal" role="dialog" aria-modal="true" aria-labelledby="dashboard-title"><div className="modalHead"><div><p className="eyebrow">Tournament centre</p><h2 id="dashboard-title">Your tournaments</h2></div><button aria-label="Close" onClick={() => setShowDashboard(false)}>×</button></div><button className="newTournament" onClick={createTournament}>＋ Create tournament</button><div className="tournamentSections"><h3>Active</h3><div className="tournamentGrid">{catalog.filter((item) => !item.archived).map((item) => <article className={item.id === shareId ? "current" : ""} key={item.id}><span>{item.id === shareId ? "OPEN NOW" : "TOURNAMENT"}</span><strong>{item.name}</strong><small>Updated {new Date(item.updatedAt).toLocaleDateString()}</small><div><button onClick={() => openTournament(item.id)}>Open</button><button onClick={() => toggleArchive(item.id)}>Archive</button></div></article>)}</div>{catalog.some((item) => item.archived) && <><h3>Archived</h3><div className="tournamentGrid archived">{catalog.filter((item) => item.archived).map((item) => <article key={item.id}><span>ARCHIVED</span><strong>{item.name}</strong><div><button onClick={() => openTournament(item.id)}>Open</button><button onClick={() => toggleArchive(item.id)}>Restore</button></div></article>)}</div></>}</div></section></div>}
+    {showChampionCelebration && champion && <ChampionCelebration champion={champion} onClose={() => setShowChampionCelebration(false)} />}
     {toast && <div className={`toast${toast.tone === "error" ? " error" : ""}`} role="status" aria-live="polite"><span aria-hidden="true">{toast.tone === "error" ? "!" : "✓"}</span>{toast.message}</div>}
   </main>;
 }
