@@ -60,3 +60,13 @@ test("includes the installed-app tournament handoff safeguards", async () => {
   assert.match(pwa, /Create a new tournament instead/);
   assert.match(pwa, /element\.inert = true/);
 });
+
+test("shows actionable iPhone installation instructions", async () => {
+  const pwa = await readFile(new URL("../app/pwa.tsx", import.meta.url), "utf8");
+  assert.match(pwa, /if \(isIos\) \{\s*setShowIosHelp\(true\);\s*return;/s);
+  assert.match(pwa, /Add Lagata to your Home Screen/);
+  assert.match(pwa, /Tap the Share button/);
+  assert.match(pwa, /Select Add to Home Screen/);
+  assert.match(pwa, /onClick=\{onClose\}/);
+  assert.doesNotMatch(pwa, /onClick=\{pwa\.closeIosHelp\(\)\}/);
+});
