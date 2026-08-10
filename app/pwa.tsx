@@ -105,7 +105,7 @@ export function PwaInstallButton({ pwa }: { pwa: PwaState }) {
 
 export function PwaExperience({ pwa }: { pwa: PwaState }) {
   return <>
-    {!pwa.isOnline && <div className="pwaOfflineBar" role="status"><span aria-hidden="true">●</span><b>You&apos;re offline</b><small>Fixtures and saved scores remain available. Editing resumes when you reconnect.</small></div>}
+    {!pwa.isOnline && <div className="pwaOfflineBar" role="status"><span aria-hidden="true">●</span><b>You&apos;re offline</b><small>Admin changes stay queued on this device and sync when you reconnect.</small></div>}
     {pwa.updateReady && <aside className="pwaUpdateToast" aria-live="polite"><div><b>Lagata update ready</b><small>Refresh to use the latest version.</small></div><button onClick={pwa.applyUpdate}>Update now</button></aside>}
     {pwa.showIosHelp && <IosInstallGuide isSafari={pwa.isIosSafari} onClose={pwa.closeIosHelp} />}
   </>;
