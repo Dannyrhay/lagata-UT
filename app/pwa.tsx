@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -8,14 +8,19 @@ type InstallPromptEvent = Event & {
 };
 
 export function usePwa() {
-  const [isOnline, setIsOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine !== false);
-  const [isStandalone] = useState(() => typeof window !== "undefined" && (window.matchMedia("(display-mode: standalone)").matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone)));
-  const [isIos] = useState(() => typeof navigator !== "undefined" && /iphone|ipad|ipod/i.test(navigator.userAgent));
+  const [isOnline, setIsOnline] = useState(true);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [isIos, setIsIos] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [showIosHelp, setShowIosHelp] = useState(false);
   const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
 
   useEffect(() => {
+    const syncEnvironment = setTimeout(() => {
+      setIsOnline(navigator.onLine !== false);
+      setIsStandalone(window.matchMedia("(display-mode: standalone)").matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone));
+      setIsIos(/iphone|ipad|ipod/i.test(navigator.userAgent));
+    }, 0);
     const online = () => setIsOnline(true);
     const offline = () => setIsOnline(false);
     const beforeInstall = (event: Event) => {
@@ -44,6 +49,7 @@ export function usePwa() {
       window.removeEventListener("online", online);
       window.removeEventListener("offline", offline);
       window.removeEventListener("beforeinstallprompt", beforeInstall);
+      clearTimeout(syncEnvironment);
       if (updateTimer) clearInterval(updateTimer);
     };
   }, []);
@@ -94,4 +100,62 @@ export function PwaExperience({ pwa }: { pwa: PwaState }) {
     {pwa.updateReady && <aside className="pwaUpdateToast" aria-live="polite"><div><b>Lagata update ready</b><small>Refresh to use the latest version.</small></div><button onClick={pwa.applyUpdate}>Update now</button></aside>}
     {pwa.showIosHelp && <div className="modalBack pwaHelpBack"><section className="pwaHelp" role="dialog" aria-modal="true" aria-labelledby="pwa-help-title"><button className="pwaHelpClose" aria-label="Close install instructions" onClick={pwa.closeIosHelp()}>×</button><span className="pwaHelpIcon" aria-hidden="true">L<small>UT</small></span><p>INSTALL ON IPHONE</p><h2 id="pwa-help-title">Put Lagata on your Home Screen</h2><ol><li><span>1</span><div><b>Tap Share</b><small>Use the Share button in Safari&apos;s toolbar.</small></div></li><li><span>2</span><div><b>Choose Add to Home Screen</b><small>Scroll the action list if you do not see it.</small></div></li><li><span>3</span><div><b>Tap Add</b><small>Lagata will open full-screen like an app.</small></div></li></ol><button className="pwaHelpDone" onClick={pwa.closeIosHelp()}>Got it</button></section></div>}
   </>;
+}
+
+export function PwaConnect({ canClose, isOnline, onClose, onConnect, onCreate }: { canClose: boolean; isOnline: boolean; onClose: () => void; onConnect: (value: string) => Promise<void>; onCreate: () => void }) {
+  const backRef = useRef<HTMLDivElement>(null);
+  const [value, setValue] = useState("");
+  const [state, setState] = useState<"idle" | "connecting" | "error">("idle");
+  const [message, setMessage] = useState("");
+  const looksLikeAdmin = /[#&]admin=/.test(value);
+
+  useEffect(() => {
+    const root = backRef.current;
+    const siblings = root?.parentElement ? Array.from(root.parentElement.children).filter((element) => element !== root) as HTMLElement[] : [];
+    siblings.forEach((element) => { element.inert = true; });
+    return () => siblings.forEach((element) => { element.inert = false; });
+  }, []);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!value.trim() || !isOnline) return;
+    setState("connecting");
+    setMessage("");
+    try {
+      await onConnect(value);
+    } catch (error) {
+      setState("error");
+      setMessage(error instanceof Error ? error.message : "That tournament could not be connected.");
+    }
+  }
+
+  async function pasteLink() {
+    try {
+      const text = await navigator.clipboard.readText();
+      setValue(text);
+      setState("idle");
+      setMessage("");
+    } catch {
+      setMessage("Press and hold in the field, then choose Paste.");
+      setState("error");
+    }
+  }
+
+  return <div ref={backRef} className="modalBack pwaConnectBack"><section className="pwaConnect" role="dialog" aria-modal="true" aria-labelledby="pwa-connect-title">
+    {canClose && <button className="pwaHelpClose" aria-label="Close connection screen" onClick={onClose}>×</button>}
+    <span className="pwaHelpIcon" aria-hidden="true">L<small>UT</small></span>
+    <p>CONNECT THIS APP</p>
+    <h2 id="pwa-connect-title">Bring your tournament onto this iPhone</h2>
+    <p className="pwaConnectIntro">Paste the link from your existing tournament. Lagata will download its latest fixtures and remember them in this installed app.</p>
+    <form onSubmit={submit}>
+      <label htmlFor="pwa-connect-value">Tournament link or spectator code</label>
+      <div className="pwaConnectField"><input id="pwa-connect-value" autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="url" value={value} onChange={(event) => { setValue(event.target.value); setState("idle"); setMessage(""); }} placeholder="https://…?t=…" /><button type="button" onClick={pasteLink}>Paste</button></div>
+      {value && <div className={`pwaAccessPreview ${looksLikeAdmin ? "admin" : "spectator"}`}><span aria-hidden="true">{looksLikeAdmin ? "◆" : "◉"}</span><div><b>{looksLikeAdmin ? "Admin access detected" : "Spectator access"}</b><small>{looksLikeAdmin ? "This device will be able to update scores." : "This device will receive view-only live scores."}</small></div></div>}
+      {state === "error" && <p className="pwaConnectError" role="alert">{message}</p>}
+      {!isOnline && <p className="pwaConnectError" role="status">Reconnect to the internet to download a tournament.</p>}
+      <button className="pwaConnectPrimary" disabled={!value.trim() || !isOnline || state === "connecting"}>{state === "connecting" ? "Connecting…" : "Connect tournament"}</button>
+    </form>
+    <div className="pwaConnectHelp"><b>Where is the link?</b><small>On the existing admin device, use <strong>Copy link</strong> for spectators or <strong>Manage tournament → Access → Copy admin link</strong> for scorekeepers.</small></div>
+    {!canClose && <button className="pwaCreateInstead" onClick={onCreate}>Create a new tournament instead</button>}
+  </section></div>;
 }
