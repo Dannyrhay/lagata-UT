@@ -70,3 +70,15 @@ test("shows actionable iPhone installation instructions", async () => {
   assert.match(pwa, /onClick=\{onClose\}/);
   assert.doesNotMatch(pwa, /onClick=\{pwa\.closeIosHelp\(\)\}/);
 });
+
+test("protects multi-device score updates and queues offline admin changes", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /lagata-pending-sync-/);
+  assert.match(page, /x-base-version/);
+  assert.match(page, /response\.status === 409/);
+  assert.match(page, /Another scorekeeper saved first/);
+  assert.match(page, /Use cloud version/);
+  assert.match(page, /Keep this device version/);
+  assert.match(page, /const isViewer = isSpectator/);
+  assert.match(page, /visibilitychange/);
+});
