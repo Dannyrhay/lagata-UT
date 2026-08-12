@@ -81,6 +81,8 @@ test("protects multi-device score updates and queues offline admin changes", asy
   assert.match(page, /Keep this device version/);
   assert.match(page, /const isViewer = isSpectator/);
   assert.match(page, /visibilitychange/);
+  assert.match(page, /showSyncPill/);
+  assert.match(page, /syncPillLeaving/);
 });
 
 test("compacts legacy audit snapshots and reports actionable sync failures", async () => {
@@ -100,6 +102,8 @@ test("ships an actionable PWA status centre, opt-in alerts and app badges", asyn
     readFile(new URL("../public/sw.js", import.meta.url), "utf8"),
   ]);
   assert.match(page, /PwaStatusCentre/);
+  assert.match(page, /Device &amp; app status/);
+  assert.match(page, /showMobileMenu && <div className="mobileActionMenu"/);
   assert.match(pwa, /Repair cached data/);
   assert.match(page, /pendingCount: data\.matches\.filter/);
   assert.match(pwa, /Notification\.requestPermission\(\)/);
