@@ -100,6 +100,8 @@ test("ships an actionable PWA status centre, opt-in alerts and app badges", asyn
     readFile(new URL("../public/sw.js", import.meta.url), "utf8"),
   ]);
   assert.match(page, /PwaStatusCentre/);
+  assert.match(page, /Device &amp; app status/);
+  assert.match(page, /showMobileMenu && <div className="mobileActionMenu"/);
   assert.match(pwa, /Repair cached data/);
   assert.match(page, /pendingCount: data\.matches\.filter/);
   assert.match(pwa, /Notification\.requestPermission\(\)/);
