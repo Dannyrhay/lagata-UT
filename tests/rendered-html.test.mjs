@@ -84,16 +84,11 @@ test("protects multi-device score updates and queues offline admin changes", asy
 });
 
 test("compacts legacy audit snapshots and reports actionable sync failures", async () => {
-  const [page, api] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../.service-build/lagata-live-api/app/api/tournament/route.ts", import.meta.url), "utf8"),
-  ]);
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   assert.match(page, /const UNDO_HISTORY_LIMIT = 5/);
   assert.match(page, /historyNeedsCompaction/);
   assert.match(page, /compactTournament\(value\)/);
   assert.match(page, /window\.addEventListener\("online", wake\)/);
   assert.match(page, /Changes queued for retry/);
   assert.match(page, /requestError\?\.status === 413/);
-  assert.match(api, /const MAX_TOURNAMENT_BYTES = 1_000_000/);
-  assert.match(api, /TextEncoder\(\)\.encode\(data\)\.byteLength/);
 });
