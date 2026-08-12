@@ -81,6 +81,8 @@ test("protects multi-device score updates and queues offline admin changes", asy
   assert.match(page, /Keep this device version/);
   assert.match(page, /const isViewer = isSpectator/);
   assert.match(page, /visibilitychange/);
+  assert.match(page, /showSyncPill/);
+  assert.match(page, /syncPillLeaving/);
 });
 
 test("compacts legacy audit snapshots and reports actionable sync failures", async () => {
