@@ -23,6 +23,22 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
+  if (event.data?.type === "GET_VERSION") event.ports?.[0]?.postMessage({ version: PWA_VERSION });
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+    const existing = clients.find((client) => "focus" in client);
+    const target = event.notification.data?.url || "/";
+    return existing ? existing.navigate(target).then(() => existing.focus()) : self.clients.openWindow(target);
+  }));
+});
+
+self.addEventListener("push", (event) => {
+  let payload = { title: "Lagata update", body: "Your tournament has a new update.", tag: "lagata-update", url: "/" };
+  try { payload = { ...payload, ...event.data?.json() }; } catch {}
+  event.waitUntil(self.registration.showNotification(payload.title, { body: payload.body, tag: payload.tag, data: { url: payload.url }, icon: "/icons/icon-192.png", badge: "/icons/icon-192.png" }));
 });
 
 async function networkFirstTournament(request) {

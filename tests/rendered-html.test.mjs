@@ -82,3 +82,48 @@ test("protects multi-device score updates and queues offline admin changes", asy
   assert.match(page, /const isViewer = isSpectator/);
   assert.match(page, /visibilitychange/);
 });
+
+test("compacts legacy audit snapshots and reports actionable sync failures", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /const UNDO_HISTORY_LIMIT = 5/);
+  assert.match(page, /historyNeedsCompaction/);
+  assert.match(page, /compactTournament\(value\)/);
+  assert.match(page, /window\.addEventListener\("online", wake\)/);
+  assert.match(page, /Changes queued for retry/);
+  assert.match(page, /requestError\?\.status === 413/);
+});
+
+test("ships an actionable PWA status centre, opt-in alerts and app badges", async () => {
+  const [page, pwa, worker] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/pwa.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../public/sw.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /PwaStatusCentre/);
+  assert.match(pwa, /Repair cached data/);
+  assert.match(page, /pendingCount: data\.matches\.filter/);
+  assert.match(pwa, /Notification\.requestPermission\(\)/);
+  assert.match(pwa, /pushManager\.subscribe/);
+  assert.match(pwa, /\/api\/push-key/);
+  assert.match(pwa, /\/api\/push-subscription/);
+  assert.match(pwa, /lagata-notifications-enabled/);
+  assert.match(pwa, /setAppBadge/);
+  assert.match(pwa, /Match now live/);
+  assert.match(pwa, /Final result/);
+  assert.match(pwa, /is champion/);
+  assert.match(worker, /GET_VERSION/);
+  assert.match(worker, /notificationclick/);
+  assert.match(worker, /addEventListener\("push"/);
+});
+
+test("keeps spectator, conflict and tournament-format reliability boundaries", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /const isViewer = isSpectator/);
+  assert.match(page, /if \(isViewer\) return/);
+  assert.match(page, /x-base-version/);
+  assert.match(page, /response\.status === 409/);
+  assert.match(page, /format === "knockout" \? advanceKnockout/);
+  assert.match(page, /format === "league"/);
+  assert.match(page, /window\.addEventListener\("pageshow", wake\)/);
+  assert.match(page, /window\.addEventListener\("online", wake\)/);
+});
