@@ -20,24 +20,37 @@ test("server-renders the Lagata application and PWA metadata", async () => {
   const html = await response.text();
   assert.match(html, /<title>Lagata Ultimate Team — FC Tournament Tracker<\/title>/i);
   assert.match(html, /<link rel="manifest" href="\/manifest\.webmanifest"\/>/i);
+  assert.match(html, /<script[^>]+src="\/register-sw\.js"[^>]*><\/script>/i);
   assert.match(html, /<link rel="apple-touch-icon"[^>]*apple-touch-icon\.png/i);
   assert.match(html, /Tournament in progress/i);
   assert.match(html, /Friday Night League/i);
   assert.doesNotMatch(html, /You&#x27;re offline/i);
 });
 
-test("ships a versioned offline shell and complete icon set", async () => {
-  const [manifestSource, serviceWorker] = await Promise.all([
+test("ships an explicitly registered, versioned offline shell and complete icon set", async () => {
+  const [manifestSource, serviceWorker, registrationScript] = await Promise.all([
     readFile(new URL("../dist/client/manifest.webmanifest", import.meta.url), "utf8"),
     readFile(new URL("../dist/client/sw.js", import.meta.url), "utf8"),
+    readFile(new URL("../dist/client/register-sw.js", import.meta.url), "utf8"),
   ]);
   const manifest = JSON.parse(manifestSource);
   assert.equal(manifest.name, "Lagata Ultimate Team");
   assert.equal(manifest.display, "standalone");
+  assert.equal(manifest.lang, "en-GB");
+  assert.equal(manifest.dir, "ltr");
+  assert.equal(manifest.orientation, "any");
+  assert.deepEqual(manifest.launch_handler.client_mode, ["navigate-existing", "auto"]);
+  assert.equal(manifest.handle_links, "preferred");
+  assert.ok(manifest.screenshots.some((shot) => shot.form_factor === "narrow"));
+  assert.ok(manifest.screenshots.some((shot) => shot.form_factor === "wide"));
+  assert.ok(manifest.shortcuts.some((shortcut) => shortcut.url === "/?view=status"));
   assert.ok(manifest.icons.some((icon) => icon.sizes === "512x512" && icon.purpose === "maskable"));
   assert.doesNotMatch(serviceWorker, /__PWA_VERSION__|INJECT_PRECACHE/);
   assert.match(serviceWorker, /const PWA_VERSION = "[a-f0-9]{12}"/);
   assert.match(serviceWorker, /SKIP_WAITING/);
+  assert.match(registrationScript, /navigator\.serviceWorker\.register\("\/sw\.js"/);
+  assert.match(registrationScript, /scope: "\/"/);
+  assert.match(registrationScript, /updateViaCache: "none"/);
   await Promise.all([
     "apple-touch-icon.png",
     "icon-192.png",
@@ -45,6 +58,7 @@ test("ships a versioned offline shell and complete icon set", async () => {
     "icon-192-maskable.png",
     "icon-512-maskable.png",
   ].map((name) => access(new URL(`../public/icons/${name}`, import.meta.url))));
+  await Promise.all(manifest.screenshots.map((shot) => access(new URL(`../public${shot.src}`, import.meta.url))));
 });
 
 test("includes the installed-app tournament handoff safeguards", async () => {

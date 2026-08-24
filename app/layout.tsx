@@ -31,5 +31,8 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body className={geist.variable}>{children}</body></html>;
+  return <html lang="en">
+    <head><script src="/register-sw.js" defer /></head>
+    <body className={geist.variable}>{children}</body>
+  </html>;
 }
