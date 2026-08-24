@@ -34,6 +34,14 @@ test("ships a versioned offline shell and complete icon set", async () => {
   const manifest = JSON.parse(manifestSource);
   assert.equal(manifest.name, "Lagata Ultimate Team");
   assert.equal(manifest.display, "standalone");
+  assert.equal(manifest.lang, "en-GB");
+  assert.equal(manifest.dir, "ltr");
+  assert.equal(manifest.orientation, "any");
+  assert.deepEqual(manifest.launch_handler.client_mode, ["navigate-existing", "auto"]);
+  assert.equal(manifest.handle_links, "preferred");
+  assert.ok(manifest.screenshots.some((shot) => shot.form_factor === "narrow"));
+  assert.ok(manifest.screenshots.some((shot) => shot.form_factor === "wide"));
+  assert.ok(manifest.shortcuts.some((shortcut) => shortcut.url === "/?view=status"));
   assert.ok(manifest.icons.some((icon) => icon.sizes === "512x512" && icon.purpose === "maskable"));
   assert.doesNotMatch(serviceWorker, /__PWA_VERSION__|INJECT_PRECACHE/);
   assert.match(serviceWorker, /const PWA_VERSION = "[a-f0-9]{12}"/);
@@ -45,6 +53,7 @@ test("ships a versioned offline shell and complete icon set", async () => {
     "icon-192-maskable.png",
     "icon-512-maskable.png",
   ].map((name) => access(new URL(`../public/icons/${name}`, import.meta.url))));
+  await Promise.all(manifest.screenshots.map((shot) => access(new URL(`../public${shot.src}`, import.meta.url))));
 });
 
 test("includes the installed-app tournament handoff safeguards", async () => {

@@ -3,10 +3,15 @@
   "name": "Lagata Ultimate Team",
   "short_name": "Lagata UT",
   "description": "Run FC tournaments, publish live fixtures and crown your champion.",
+  "lang": "en-GB",
+  "dir": "ltr",
   "start_url": "/",
   "scope": "/",
+  "orientation": "any",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
+  "handle_links": "preferred",
+  "launch_handler": { "client_mode": ["navigate-existing", "auto"] },
   "background_color": "#f4f5ef",
   "theme_color": "#101813",
   "categories": ["sports", "entertainment", "productivity"],
@@ -17,6 +22,13 @@
     { "src": "/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    { "name": "Open tournaments", "short_name": "Tournaments", "url": "/" }
+    { "name": "Open tournaments", "short_name": "Tournaments", "description": "Switch or create a tournament", "url": "/?view=tournaments", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Current tournament", "short_name": "Current", "description": "Open the latest tournament on this device", "url": "/?view=current", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Device and app status", "short_name": "App status", "description": "Check installation, connection and sync", "url": "/?view=status", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ],
+  "screenshots": [
+    { "src": "/screenshots/lagata-mobile-matches.png", "sizes": "390x844", "type": "image/png", "form_factor": "narrow", "label": "Live fixtures and scores on mobile" },
+    { "src": "/screenshots/lagata-mobile-pitch.png", "sizes": "390x844", "type": "image/png", "form_factor": "narrow", "label": "Knockout journey on the tournament pitch" },
+    { "src": "/screenshots/lagata-desktop-results.png", "sizes": "1280x800", "type": "image/png", "form_factor": "wide", "label": "Tournament results, standings and awards on desktop" }
   ]
 }

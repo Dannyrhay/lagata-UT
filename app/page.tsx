@@ -247,6 +247,13 @@ export default function Home() {
     else { const saved = localStorage.getItem("fc-night-tournament"); if (saved) try { setData(normaliseTournament(JSON.parse(saved))); } catch {} setReady(true); }
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("lagata-theme", theme); }, [theme]);
+  useEffect(() => {
+    if (!ready) return;
+    const params = new URLSearchParams(location.search); const view = params.get("view");
+    if (view === "tournaments") setShowDashboard(true);
+    if (view === "status") setShowPwaStatus(true);
+    if (view) { params.delete("view"); const query = params.toString(); history.replaceState({}, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash}`); }
+  }, [ready]);
   useEffect(() => { if (ready && shareId) { localStorage.setItem("lagata-last-tournament", shareId); localStorage.setItem(`lagata-cached-tournament-${shareId}`, JSON.stringify(data)); if (editToken && cloudLoaded.current && !pwa.isOnline) { if (syncPayload(data) !== lastSyncedPayload.current) { writePendingSync(shareId, data, serverVersion.current); setSyncStatus("queued"); } else setSyncStatus("offline"); } else if (editToken && cloudLoaded.current && syncBlocked.current && syncPayload(data) !== lastSyncedPayload.current) writePendingSync(shareId, data, serverVersion.current); } }, [data, ready, shareId, editToken, pwa.isOnline]);
   useEffect(() => { if (pwa.isOnline && syncStatus === "offline" && syncPayload(data) === lastSyncedPayload.current) setSyncStatus("saved"); }, [pwa.isOnline, syncStatus, data]);
   useEffect(() => {
