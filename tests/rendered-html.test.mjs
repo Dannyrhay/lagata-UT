@@ -145,3 +145,16 @@ test("keeps spectator, conflict and tournament-format reliability boundaries", a
   assert.match(page, /window\.addEventListener\("pageshow", wake\)/);
   assert.match(page, /window\.addEventListener\("online", wake\)/);
 });
+
+test("keeps long league pitch journeys inside desktop and tablet viewports", async () => {
+  const [page, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /tournament\.format === "league" && maxRound > 4/);
+  assert.match(page, /extendedJourney/);
+  assert.match(styles, /pitchBoard\.league\.extendedJourney/);
+  assert.match(styles, /grid-template-columns:repeat\(5,minmax\(0,1fr\)\)/);
+  assert.match(styles, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(styles, /pitchBoard\.league\.extendedJourney \{ min-height:0; overflow:hidden; \}/);
+});
