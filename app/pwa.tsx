@@ -8,6 +8,7 @@ type InstallPromptEvent = Event & {
 };
 
 type BadgeNavigator = Navigator & { setAppBadge?: (count?: number) => Promise<void>; clearAppBadge?: () => Promise<void> };
+type PwaWindow = Window & { __lagataServiceWorkerRegistration?: Promise<ServiceWorkerRegistration> };
 const PUSH_API = "https://lagata-live-scores.benernestcass.chatgpt.site";
 function pushKeyBytes(value: string) { const padded = value.padEnd(value.length + (4 - value.length % 4) % 4, "=").replace(/-/g, "+").replace(/_/g, "/"); return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0)).buffer as ArrayBuffer; }
 export type TournamentActivity = {
@@ -55,7 +56,10 @@ export function usePwa() {
 
     let updateTimer: ReturnType<typeof setInterval> | undefined;
     if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
-      navigator.serviceWorker.register("/sw.js").then((registration) => {
+      const registrationPromise = (window as PwaWindow).__lagataServiceWorkerRegistration
+        ?? navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" });
+      (window as PwaWindow).__lagataServiceWorkerRegistration = registrationPromise;
+      registrationPromise.then((registration) => {
         if (registration.waiting) setWaitingWorker(registration.waiting);
         registration.addEventListener("updatefound", () => {
           const worker = registration.installing;
